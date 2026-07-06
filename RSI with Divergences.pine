@@ -1,0 +1,184 @@
+//@version=6
+indicator("RSI", "RSI Zones+Div", max_labels_count = 500)
+
+//------------------------------------------------------------------------------
+// Settings — RSI
+//------------------------------------------------------------------------------
+len      = input.int(14,  minval = 1,               title = "RSI Length",    group = "RSI")
+ob       = input.int(70,  minval = 0, maxval = 100, title = "Overbought",    group = "RSI")
+os       = input.int(30,  minval = 0, maxval = 100, title = "Oversold",      group = "RSI")
+omid     = input.int(50,  minval = 0, maxval = 100, title = "Midline",       group = "RSI")
+hideMid  = input.bool(false, title = "Hide Midline",                          group = "RSI")
+
+//------------------------------------------------------------------------------
+// Settings — Divergence
+//------------------------------------------------------------------------------
+xbars      = input.int(90, minval = 1, title = "Div Lookback (bars)",         group = "Divergence")
+hidePivots = input.bool(false, title = "Hide Pivot Labels",                   group = "Divergence")
+shorterLbl = input.bool(false, title = "Shorter Labels (symbols only)",       group = "Divergence")
+hideLbl    = input.bool(false, title = "Hide Labels, Color Background Instead",group = "Divergence")
+
+//------------------------------------------------------------------------------
+// Settings — Control Zones
+//------------------------------------------------------------------------------
+showZones    = input.bool(true,                      title = "Show Control Zones",  group = "Control Zones")
+bullZoneHigh = input.float(80,                       title = "Bull Zone Top",       group = "Control Zones")
+bullZoneLow  = input.float(65,                       title = "Bull Zone Bottom",    group = "Control Zones")
+bullZoneCss  = input(color.new(#00e676, 88),         title = "Bull Zone Color",     group = "Control Zones")
+bearZoneHigh = input.float(35,                       title = "Bear Zone Top",       group = "Control Zones")
+bearZoneLow  = input.float(20,                       title = "Bear Zone Bottom",    group = "Control Zones")
+bearZoneCss  = input(color.new(#ff1744, 88),         title = "Bear Zone Color",     group = "Control Zones")
+
+//------------------------------------------------------------------------------
+// RSI
+//------------------------------------------------------------------------------
+rsi = ta.rsi(close, len)
+
+//------------------------------------------------------------------------------
+// Divergence Logic (Libertus method)
+//------------------------------------------------------------------------------
+hb = math.abs(ta.highestbars(rsi, xbars))
+lb = math.abs(ta.lowestbars(rsi, xbars))
+
+var float maxPrice = close
+var float maxRsi   = rsi
+var float minPrice = close
+var float minRsi   = rsi
+
+maxPrice := hb == 0 ? close : na(maxPrice[1]) ? close : maxPrice[1]
+maxRsi   := hb == 0 ? rsi   : na(maxRsi[1])   ? rsi   : maxRsi[1]
+minPrice := lb == 0 ? close : na(minPrice[1]) ? close : minPrice[1]
+minRsi   := lb == 0 ? rsi   : na(minRsi[1])   ? rsi   : minRsi[1]
+
+if close > maxPrice
+    maxPrice := close
+if rsi > maxRsi
+    maxRsi := rsi
+if close < minPrice
+    minPrice := close
+if rsi < minRsi
+    minRsi := rsi
+
+// v6 fix: declare as var bool = false, set true only when condition met each bar
+var bool pivoth  = false
+var bool pivotl  = false
+var bool divbear = false
+var bool divbull = false
+
+pivoth  := (maxRsi == maxRsi[2]) and (maxRsi[2] != maxRsi[3])
+pivotl  := (minRsi == minRsi[2]) and (minRsi[2] != minRsi[3])
+divbear := (maxPrice[1] > maxPrice[2]) and (rsi[1] < maxRsi) and (rsi <= rsi[1])
+divbull := (minPrice[1] < minPrice[2]) and (rsi[1] > minRsi) and (rsi >= rsi[1])
+
+//------------------------------------------------------------------------------
+// Control Zone Breaks
+//------------------------------------------------------------------------------
+bullZoneLost = ta.crossunder(rsi, bullZoneLow)
+bearZoneLost = ta.crossover(rsi,  bearZoneHigh)
+
+//------------------------------------------------------------------------------
+// RSI Plot (red when OB/OS, white otherwise)
+//------------------------------------------------------------------------------
+plot(rsi,
+     color     = rsi > ob or rsi < os ? color.new(color.red, 0) : color.new(color.white, 0),
+     linewidth = 2)
+
+//------------------------------------------------------------------------------
+// OB / OS / Midline
+//------------------------------------------------------------------------------
+band_ob  = hline(ob,   color = color.new(color.red,  40), linestyle = hline.style_dotted)
+band_os  = hline(os,   color = color.new(color.red,  40), linestyle = hline.style_dotted)
+band_mid = hline(omid, color = color.new(color.gray, hideMid ? 100 : 70), linestyle = hline.style_dotted)
+
+fill(band_mid, band_ob, color = color.new(color.lime, 94))
+fill(band_os,  band_mid, color = color.new(color.red,  94))
+
+//------------------------------------------------------------------------------
+// Control Zone Fills
+//------------------------------------------------------------------------------
+p_bullHigh = plot(showZones ? bullZoneHigh : na, color = na, editable = false, display = display.none)
+p_bullLow  = plot(showZones ? bullZoneLow  : na, color = na, editable = false, display = display.none)
+p_bearHigh = plot(showZones ? bearZoneHigh : na, color = na, editable = false, display = display.none)
+p_bearLow  = plot(showZones ? bearZoneLow  : na, color = na, editable = false, display = display.none)
+
+fill(p_bullHigh, p_bullLow, bullZoneCss)
+fill(p_bearHigh, p_bearLow, bearZoneCss)
+
+hline(bullZoneHigh, "Bull Zone Top",    color = #00e676, linestyle = hline.style_dashed, linewidth = 1)
+hline(bullZoneLow,  "Bull Zone Bottom", color = #00e676, linestyle = hline.style_dashed, linewidth = 1)
+hline(bearZoneHigh, "Bear Zone Top",    color = #ff1744, linestyle = hline.style_dashed, linewidth = 1)
+hline(bearZoneLow,  "Bear Zone Bottom", color = #ff1744, linestyle = hline.style_dashed, linewidth = 1)
+
+//------------------------------------------------------------------------------
+// Divergence & Pivot Labels
+//------------------------------------------------------------------------------
+labelTxt(base) =>
+    shorterLbl ? "" : base
+
+if divbear
+    l = label.new(bar_index - 1, rsi[1] + 1, labelTxt("BEAR"),
+          color     = color.red,
+          textcolor = color.white,
+          style     = label.style_label_down,
+          yloc      = yloc.price,
+          size      = size.small)
+
+if divbull
+    l = label.new(bar_index - 1, rsi[1] - 1, labelTxt("BULL"),
+          color     = color.green,
+          textcolor = color.white,
+          style     = label.style_label_up,
+          yloc      = yloc.price,
+          size      = size.small)
+
+if pivoth and not hidePivots and not hideLbl
+    l = label.new(bar_index - 2, maxRsi + 1, labelTxt("PIVOT"),
+          color     = color.blue,
+          textcolor = color.white,
+          style     = label.style_label_down,
+          yloc      = yloc.price,
+          size      = size.small)
+
+if pivotl and not hidePivots and not hideLbl
+    l = label.new(bar_index - 2, minRsi - 1, labelTxt("PIVOT"),
+          color     = color.blue,
+          textcolor = color.white,
+          style     = label.style_label_up,
+          yloc      = yloc.price,
+          size      = size.small)
+
+// Background color mode
+bgcolor(hideLbl ? (divbear ? color.new(color.red, 50) : divbull ? color.new(color.green, 50) : na) : na, offset = -1)
+bgcolor(hideLbl ? (hidePivots ? na : (pivoth or pivotl ? color.new(color.blue, 50) : na)) : na, offset = -2)
+
+//------------------------------------------------------------------------------
+// Control Zone Break Arrows (▼ short watch, ▲ long watch)
+// Full color = prior divergence within 20 bars; 50% transparent = no confluence
+//------------------------------------------------------------------------------
+if bullZoneLost
+    priorDiv = ta.barssince(divbear) < 20
+    label.new(bar_index, rsi, "▼",
+          style     = label.style_label_down,
+          color     = color.new(#ff1744, priorDiv ? 0 : 50),
+          textcolor = color.white,
+          yloc      = yloc.price,
+          size      = size.small)
+
+if bearZoneLost
+    priorDiv = ta.barssince(divbull) < 20
+    label.new(bar_index, rsi, "▲",
+          style     = label.style_label_up,
+          color     = color.new(#00e676, priorDiv ? 0 : 50),
+          textcolor = color.black,
+          yloc      = yloc.price,
+          size      = size.small)
+
+//------------------------------------------------------------------------------
+// Alerts
+//------------------------------------------------------------------------------
+alertcondition(divbear,      title = "Bearish Divergence",           message = "RSI: Bear Div")
+alertcondition(divbull,      title = "Bullish Divergence",           message = "RSI: Bull Div")
+alertcondition(pivoth,       title = "Pivot High",                   message = "RSI: Pivot High")
+alertcondition(pivotl,       title = "Pivot Low",                    message = "RSI: Pivot Low")
+alertcondition(bullZoneLost, title = "Bull Zone Lost — Short Watch", message = "RSI: Bull Zone Lost ▼")
+alertcondition(bearZoneLost, title = "Bear Zone Lost — Long Watch",  message = "RSI: Bear Zone Lost ▲")
