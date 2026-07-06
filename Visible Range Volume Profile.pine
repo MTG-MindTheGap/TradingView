@@ -1,0 +1,606 @@
+//@version=6
+indicator('Visible Range Volume Profile', overlay = true,
+     max_boxes_count  = 500,
+     max_lines_count  = 500,
+     max_labels_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+string GRP_VRVP_INPUTS  = 'VRVP Inputs'
+string GRP_VRVP_STYLE   = 'VRVP Style'
+string GRP_VRVP_ENHANCE = 'VRVP Enhancements'
+
+vrvpEnabled       = input.bool(true, 'Enable VRVP', group = GRP_VRVP_INPUTS)
+vrvpRowsLayout    = input.string('Number of Rows', 'Rows Layout',
+     options = ['Number of Rows', 'Ticks Per Row', 'Points Per Row'], group = GRP_VRVP_INPUTS,
+     tooltip = 'Number of Rows: specify total rows. Ticks Per Row: price ticks (mintick units). Points Per Row: actual price points.')
+vrvpRowSize       = input.int(50, 'Row Size', minval = 1, maxval = 500, group = GRP_VRVP_INPUTS)
+vrvpVolumeMode    = input.string('Up/Down', 'Volume',
+     options = ['Up/Down', 'Total', 'Delta'], group = GRP_VRVP_INPUTS)
+vrvpVAPercent     = input.int(70, 'Value Area Volume %', minval = 1, maxval = 100, group = GRP_VRVP_INPUTS)
+vrvpVolDistribution = input.string('Typical Price Weighted', 'Volume Distribution',
+     options = ['Uniform', 'Typical Price Weighted', 'Close Weighted'], group = GRP_VRVP_INPUTS)
+
+vrvpShowProfile   = input.bool(true,  'Show Volume Profile',          group = GRP_VRVP_STYLE)
+vrvpProfileWidth  = input.int(15,     'Width (% of visible bars)',    minval = 5, maxval = 50, group = GRP_VRVP_STYLE)
+vrvpPlacement     = input.string('Right', 'Placement', options = ['Right', 'Left'], group = GRP_VRVP_STYLE)
+vrvpUpColor       = input.color(#26a69a, 'Up Volume Color',           group = GRP_VRVP_STYLE)
+vrvpDownColor     = input.color(#787b86, 'Down Volume Color',         group = GRP_VRVP_STYLE)
+vrvpVAUpColor     = input.color(color.new(#26a69a, 50), 'Value Area Up Color',   group = GRP_VRVP_STYLE)
+vrvpVADownColor   = input.color(color.new(#787b86, 50), 'Value Area Down Color', group = GRP_VRVP_STYLE)
+
+vrvpShowVAH       = input.bool(true,      'Show VAH', inline = 'vrvpvah', group = GRP_VRVP_STYLE)
+vrvpVAHColor      = input.color(#26a69a,  '',          inline = 'vrvpvah', group = GRP_VRVP_STYLE)
+vrvpVAHStyle      = input.string('Dashed','',          inline = 'vrvpvah', options = ['Solid', 'Dashed', 'Dotted'], group = GRP_VRVP_STYLE)
+vrvpShowVAL       = input.bool(true,      'Show VAL', inline = 'vrvpval', group = GRP_VRVP_STYLE)
+vrvpVALColor      = input.color(#26a69a,  '',          inline = 'vrvpval', group = GRP_VRVP_STYLE)
+vrvpVALStyle      = input.string('Dashed','',          inline = 'vrvpval', options = ['Solid', 'Dashed', 'Dotted'], group = GRP_VRVP_STYLE)
+vrvpShowPOC       = input.bool(true,      'Show POC', inline = 'vrvppoc', group = GRP_VRVP_STYLE)
+vrvpPOCColor      = input.color(#ef5350,  '',          inline = 'vrvppoc', group = GRP_VRVP_STYLE)
+vrvpPOCStyle      = input.string('Dashed','',          inline = 'vrvppoc', options = ['Solid', 'Dashed', 'Dotted'], group = GRP_VRVP_STYLE)
+vrvpShowPriceLabels = input.bool(true, 'Labels on Price Scale',                   group = GRP_VRVP_STYLE)
+
+vrvpPocCount      = input.int(1, 'Number of POCs', minval = 1, maxval = 8, group = GRP_VRVP_ENHANCE)
+vrvpPocMode       = input.string('Volume Nodes', 'POC Mode',
+     options = ['Highest Rows', 'Volume Nodes'], group = GRP_VRVP_ENHANCE)
+vrvpMinNodeSep    = input.int(0, 'Min Node Separation', minval = 0, maxval = 50, group = GRP_VRVP_ENHANCE)
+vrvpPoc2Color     = input.color(#ff9800, 'POC 2 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc3Color     = input.color(#ffeb3b, 'POC 3 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc4Color     = input.color(#9c27b0, 'POC 4 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc5Color     = input.color(#00bcd4, 'POC 5 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc6Color     = input.color(#e91e63, 'POC 6 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc7Color     = input.color(#8bc34a, 'POC 7 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc8Color     = input.color(#607d8b, 'POC 8 Color', group = GRP_VRVP_ENHANCE)
+vrvpPoc234Style   = input.string('Dotted', 'Secondary POC Style',
+     options = ['Solid', 'Dashed', 'Dotted'], group = GRP_VRVP_ENHANCE)
+vrvpShowPocLabels = input.bool(false, 'Show POC Labels on Chart', group = GRP_VRVP_ENHANCE)
+vrvpPocLabelSize  = input.string('Small', 'POC Label Size',
+     options = ['Tiny', 'Small', 'Normal'], group = GRP_VRVP_ENHANCE)
+
+vrvpDeltaIntensity = input.bool(false, 'Delta Intensity Mode', group = GRP_VRVP_ENHANCE)
+vrvpDeltaContrast  = input.float(3.0, 'Delta Intensity Contrast',
+     minval = 1.0, maxval = 10.0, step = 0.5,
+     tooltip = 'Higher = more contrast. Weak deltas fade faster, strong deltas stay vivid.',
+     group = GRP_VRVP_ENHANCE)
+
+vrvpDeltaBullColor = input.color(#26a69a, 'Bullish Intensity Color', group = GRP_VRVP_ENHANCE)
+vrvpDeltaBearColor = input.color(#ef5350, 'Bearish Intensity Color', group = GRP_VRVP_ENHANCE)
+vrvpShowStats     = input.bool(false, 'Show Stats Table', group = GRP_VRVP_ENHANCE)
+vrvpTablePosition = input.string('Top Right', 'Table Position',
+     options = ['Top Left', 'Top Right', 'Bottom Left', 'Bottom Right'], group = GRP_VRVP_ENHANCE)
+vrvpTableSize     = input.string('Small', 'Table Size',
+     options = ['Tiny', 'Small', 'Normal'], group = GRP_VRVP_ENHANCE)
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'Tiny'   => size.tiny
+        'small'  => size.small
+        'Small'  => size.small
+        'normal' => size.normal
+        'Normal' => size.normal
+        'large'  => size.large
+        'Large'  => size.large
+        'huge'   => size.huge
+        'Huge'   => size.huge
+        =>          size.tiny
+
+f_getLineStyle(s) =>
+    switch s
+        'Solid'  => line.style_solid
+        'Dashed' => line.style_dashed
+        'Dotted' => line.style_dotted
+        =>          line.style_dashed
+
+f_getTablePos(s) =>
+    switch s
+        'Top Left'      => position.top_left
+        'Top Center'    => position.top_center
+        'Top Right'     => position.top_right
+        'Bottom Left'   => position.bottom_left
+        'Bottom Center' => position.bottom_center
+        'Bottom Right'  => position.bottom_right
+        =>                 position.top_center
+
+f_triangleWeight(float price, float center, float halfWidth) =>
+    if halfWidth <= 0
+        1.0
+    else
+        float distance = math.abs(price - center)
+        math.max(0.0, 1.0 - (distance / halfWidth))
+
+f_formatVolume(float vol) =>
+    string result = ''
+    if vol >= 1000000000
+        result := str.tostring(vol / 1000000000, '#.##') + 'B'
+    else if vol >= 1000000
+        result := str.tostring(vol / 1000000, '#.##') + 'M'
+    else if vol >= 1000
+        result := str.tostring(vol / 1000, '#.##') + 'K'
+    else
+        result := str.tostring(vol, '#.##')
+    result
+
+// ═══════════════════════════════════════════════════════════════════════
+// VRVP — VISIBLE RANGE DETECTION & VOLUME ACCUMULATION
+// ═══════════════════════════════════════════════════════════════════════
+int VRVP_INTERNAL_ROWS = 400
+
+int vrvpLeftTime  = chart.left_visible_bar_time
+int vrvpRightTime = chart.right_visible_bar_time
+bool vrvpIsVisible = time >= vrvpLeftTime and time <= vrvpRightTime
+
+var int vrvpVisibleBarCount = 0
+var int vrvpLeftBarIdx      = 0
+var int vrvpRightBarIdx     = 0
+
+if time == vrvpLeftTime
+    vrvpLeftBarIdx      := bar_index
+    vrvpVisibleBarCount := 0
+
+if vrvpIsVisible
+    vrvpVisibleBarCount += 1
+    vrvpRightBarIdx     := bar_index
+
+var float vrvpVisibleHigh = na
+var float vrvpVisibleLow  = na
+
+if time == vrvpLeftTime
+    vrvpVisibleHigh := high
+    vrvpVisibleLow  := low
+else if vrvpIsVisible
+    vrvpVisibleHigh := math.max(nz(vrvpVisibleHigh, high), high)
+    vrvpVisibleLow  := math.min(nz(vrvpVisibleLow,  low),  low)
+
+// Internal fine-resolution arrays (always allocated; only used when enabled)
+var float[] vrvpIntUpVol    = array.new_float(VRVP_INTERNAL_ROWS, 0.0)
+var float[] vrvpIntDownVol  = array.new_float(VRVP_INTERNAL_ROWS, 0.0)
+var float[] vrvpIntTotalVol = array.new_float(VRVP_INTERNAL_ROWS, 0.0)
+var float   vrvpRawVolSum   = 0.0
+
+// Reset on left bar
+if time == vrvpLeftTime and vrvpEnabled
+    for i = 0 to VRVP_INTERNAL_ROWS - 1
+        array.set(vrvpIntUpVol,    i, 0.0)
+        array.set(vrvpIntDownVol,  i, 0.0)
+        array.set(vrvpIntTotalVol, i, 0.0)
+    vrvpRawVolSum := 0.0
+
+// Accumulate volume
+float vrvpPriceRange     = nz(vrvpVisibleHigh - vrvpVisibleLow, 0)
+float vrvpIntRowHeight   = vrvpPriceRange > 0 ? vrvpPriceRange / VRVP_INTERNAL_ROWS : 0
+
+if vrvpEnabled and vrvpIsVisible and vrvpIntRowHeight > 0 and not na(vrvpVisibleLow)
+    float vrvpBarHigh   = high
+    float vrvpBarLow    = low
+    float vrvpBarSpread = vrvpBarHigh - vrvpBarLow
+    float vrvpBarVol    = volume
+    bool  vrvpIsUpBar   = close >= open
+
+    vrvpRawVolSum += vrvpBarVol
+
+    float volCenter = switch vrvpVolDistribution
+        'Typical Price Weighted' => (high + low + close) / 3
+        'Close Weighted'         => close
+        =>                          (high + low) / 2
+
+    float halfSpread = vrvpBarSpread / 2
+
+    if vrvpBarSpread < syminfo.mintick
+        int targetRow = int(math.floor((close - vrvpVisibleLow) / vrvpIntRowHeight))
+        targetRow := math.max(0, math.min(targetRow, VRVP_INTERNAL_ROWS - 1))
+        if vrvpIsUpBar
+            array.set(vrvpIntUpVol, targetRow, array.get(vrvpIntUpVol, targetRow) + vrvpBarVol)
+        else
+            array.set(vrvpIntDownVol, targetRow, array.get(vrvpIntDownVol, targetRow) + vrvpBarVol)
+        array.set(vrvpIntTotalVol, targetRow, array.get(vrvpIntTotalVol, targetRow) + vrvpBarVol)
+    else
+        float totalWeight = 0.0
+        var float[] vrvpRowWeights = array.new_float(VRVP_INTERNAL_ROWS, 0.0)
+
+        for i = 0 to VRVP_INTERNAL_ROWS - 1
+            float rowBottom = vrvpVisibleLow + (i * vrvpIntRowHeight)
+            float rowTop    = rowBottom + vrvpIntRowHeight
+            float rowMid    = (rowBottom + rowTop) / 2
+
+            if vrvpBarHigh >= rowBottom and vrvpBarLow <= rowTop
+                float weight = 0.0
+                if vrvpVolDistribution == 'Uniform'
+                    float overlapTop    = math.min(vrvpBarHigh, rowTop)
+                    float overlapBottom = math.max(vrvpBarLow,  rowBottom)
+                    float overlapRange  = overlapTop - overlapBottom
+                    weight := overlapRange > 0 ? overlapRange / vrvpBarSpread : 0.0
+                else
+                    weight := f_triangleWeight(rowMid, volCenter, halfSpread)
+                    float overlapTop    = math.min(vrvpBarHigh, rowTop)
+                    float overlapBottom = math.max(vrvpBarLow,  rowBottom)
+                    if overlapTop <= overlapBottom
+                        weight := 0.0
+
+                array.set(vrvpRowWeights, i, weight)
+                totalWeight += weight
+            else
+                array.set(vrvpRowWeights, i, 0.0)
+
+        if totalWeight > 0
+            for i = 0 to VRVP_INTERNAL_ROWS - 1
+                float weight = array.get(vrvpRowWeights, i)
+                if weight > 0
+                    float volContrib = vrvpBarVol * (weight / totalWeight)
+                    if vrvpIsUpBar
+                        array.set(vrvpIntUpVol, i, array.get(vrvpIntUpVol, i) + volContrib)
+                    else
+                        array.set(vrvpIntDownVol, i, array.get(vrvpIntDownVol, i) + volContrib)
+                    array.set(vrvpIntTotalVol, i, array.get(vrvpIntTotalVol, i) + volContrib)
+
+// ═══════════════════════════════════════════════════════════════════════
+// VRVP — AGGREGATE TO DISPLAY ROWS + POC / VA CALC + RENDER
+// ═══════════════════════════════════════════════════════════════════════
+var float[] vrvpRowUpVol    = array.new_float(200, 0.0)
+var float[] vrvpRowDownVol  = array.new_float(200, 0.0)
+var float[] vrvpRowTotalVol = array.new_float(200, 0.0)
+
+var int    vrvpPocIdx       = 0
+var float  vrvpPocPrice     = na
+var int[]  vrvpTopPocIdx    = array.new_int(8, 0)
+var float[] vrvpTopPocPrices = array.new_float(8, na)
+var float  vrvpVahPrice     = na
+var float  vrvpValPrice     = na
+var int    vrvpVahIdx       = 0
+var int    vrvpValIdx       = 0
+var float  vrvpTotalVol     = 0.0
+var float  vrvpTotalUpVol   = 0.0
+var float  vrvpTotalDownVol = 0.0
+
+var box[]   vrvpProfileBoxes = array.new_box()
+var line[]  vrvpLevelLines   = array.new_line()
+var label[] vrvpPriceLabels  = array.new_label()
+var table   vrvpStatsTable   = na
+
+// Compute display row count
+int vrvpDispRowCount = vrvpRowSize
+if vrvpRowsLayout == 'Ticks Per Row' and vrvpPriceRange > 0
+    float tickSz = syminfo.mintick
+    vrvpDispRowCount := math.max(1, math.round(vrvpPriceRange / (tickSz * vrvpRowSize)))
+else if vrvpRowsLayout == 'Points Per Row' and vrvpPriceRange > 0
+    vrvpDispRowCount := math.max(1, math.round(vrvpPriceRange / vrvpRowSize))
+vrvpDispRowCount := math.min(vrvpDispRowCount, 200)
+
+float vrvpDispRowHeight = vrvpPriceRange > 0 ? vrvpPriceRange / vrvpDispRowCount : 0
+
+if vrvpEnabled and time == chart.right_visible_bar_time and vrvpIntRowHeight > 0 and vrvpDispRowHeight > 0
+    // ── Aggregate internal → display ────────────────────────────────
+    for i = 0 to 199
+        array.set(vrvpRowUpVol,    i, 0.0)
+        array.set(vrvpRowDownVol,  i, 0.0)
+        array.set(vrvpRowTotalVol, i, 0.0)
+
+    for i = 0 to VRVP_INTERNAL_ROWS - 1
+        float intRowMid = vrvpVisibleLow + (i * vrvpIntRowHeight) + (vrvpIntRowHeight / 2)
+        int   dispIdx   = int(math.floor((intRowMid - vrvpVisibleLow) / vrvpDispRowHeight))
+        dispIdx := math.max(0, math.min(dispIdx, vrvpDispRowCount - 1))
+        array.set(vrvpRowUpVol,    dispIdx, array.get(vrvpRowUpVol,    dispIdx) + array.get(vrvpIntUpVol,    i))
+        array.set(vrvpRowDownVol,  dispIdx, array.get(vrvpRowDownVol,  dispIdx) + array.get(vrvpIntDownVol,  i))
+        array.set(vrvpRowTotalVol, dispIdx, array.get(vrvpRowTotalVol, dispIdx) + array.get(vrvpIntTotalVol, i))
+
+    // ── POC + Multi-POC ─────────────────────────────────────────────
+    float maxVol = 0.0
+    vrvpTotalVol     := 0.0
+    vrvpTotalUpVol   := 0.0
+    vrvpTotalDownVol := 0.0
+
+    var int[]   sortedIdx  = array.new_int(0)
+    var float[] sortedVols = array.new_float(0)
+    array.clear(sortedIdx)
+    array.clear(sortedVols)
+
+    for i = 0 to vrvpDispRowCount - 1
+        float vol  = array.get(vrvpRowTotalVol, i)
+        float uVol = array.get(vrvpRowUpVol,    i)
+        float dVol = array.get(vrvpRowDownVol,  i)
+        vrvpTotalVol     += vol
+        vrvpTotalUpVol   += uVol
+        vrvpTotalDownVol += dVol
+        array.push(sortedIdx,  i)
+        array.push(sortedVols, vol)
+        if vol > maxVol
+            maxVol     := vol
+            vrvpPocIdx := i
+
+    int minSep = vrvpMinNodeSep > 0 ? vrvpMinNodeSep : math.max(2, math.round(vrvpDispRowCount / (vrvpPocCount * 2)))
+
+    if vrvpPocMode == 'Highest Rows'
+        for rank = 0 to math.min(7, vrvpDispRowCount - 1)
+            int   maxIdx = rank
+            float maxV   = array.get(sortedVols, rank)
+            for j = rank + 1 to array.size(sortedVols) - 1
+                if array.get(sortedVols, j) > maxV
+                    maxV   := array.get(sortedVols, j)
+                    maxIdx := j
+            if maxIdx != rank
+                float tmpV = array.get(sortedVols, rank)
+                int   tmpI = array.get(sortedIdx,  rank)
+                array.set(sortedVols, rank, array.get(sortedVols, maxIdx))
+                array.set(sortedIdx,  rank, array.get(sortedIdx,  maxIdx))
+                array.set(sortedVols, maxIdx, tmpV)
+                array.set(sortedIdx,  maxIdx, tmpI)
+            int rowIdx = array.get(sortedIdx, rank)
+            array.set(vrvpTopPocIdx, rank, rowIdx)
+            float price = vrvpVisibleLow + (rowIdx * vrvpDispRowHeight) + (vrvpDispRowHeight / 2)
+            array.set(vrvpTopPocPrices, rank, price)
+    else
+        // Volume Nodes mode
+        var int[]   peakIdx  = array.new_int(0)
+        var float[] peakVols = array.new_float(0)
+        array.clear(peakIdx)
+        array.clear(peakVols)
+
+        for i = 0 to vrvpDispRowCount - 1
+            float currVol = array.get(vrvpRowTotalVol, i)
+            float prevVol = i > 0 ? array.get(vrvpRowTotalVol, i - 1) : 0.0
+            float nextVol = i < vrvpDispRowCount - 1 ? array.get(vrvpRowTotalVol, i + 1) : 0.0
+            bool isPeak = false
+            if i == 0
+                isPeak := currVol > nextVol
+            else if i == vrvpDispRowCount - 1
+                isPeak := currVol > prevVol
+            else
+                isPeak := currVol >= prevVol and currVol >= nextVol and (currVol > prevVol or currVol > nextVol)
+            if isPeak and currVol > 0
+                array.push(peakIdx,  i)
+                array.push(peakVols, currVol)
+
+        int numPeaks = array.size(peakIdx)
+        if numPeaks > 1
+            for rank = 0 to numPeaks - 2
+                int   maxIdx = rank
+                float maxV   = array.get(peakVols, rank)
+                for j = rank + 1 to numPeaks - 1
+                    if array.get(peakVols, j) > maxV
+                        maxV   := array.get(peakVols, j)
+                        maxIdx := j
+                if maxIdx != rank
+                    float tmpV = array.get(peakVols, rank)
+                    int   tmpI = array.get(peakIdx,  rank)
+                    array.set(peakVols, rank, array.get(peakVols, maxIdx))
+                    array.set(peakIdx,  rank, array.get(peakIdx,  maxIdx))
+                    array.set(peakVols, maxIdx, tmpV)
+                    array.set(peakIdx,  maxIdx, tmpI)
+
+        var int[] selIdx = array.new_int(0)
+        array.clear(selIdx)
+        if numPeaks > 0
+            for i = 0 to numPeaks - 1
+                if array.size(selIdx) >= 8
+                    break
+                int candidateIdx = array.get(peakIdx, i)
+                bool tooClose = false
+                int numSel = array.size(selIdx)
+                if numSel > 0
+                    for j = 0 to numSel - 1
+                        if math.abs(candidateIdx - array.get(selIdx, j)) < minSep
+                            tooClose := true
+                            break
+                if not tooClose
+                    array.push(selIdx, candidateIdx)
+
+        int numSelected = array.size(selIdx)
+        var float[] selVols = array.new_float(0)
+        array.clear(selVols)
+        for i = 0 to math.max(0, numSelected - 1)
+            if i < numSelected
+                array.push(selVols, array.get(vrvpRowTotalVol, array.get(selIdx, i)))
+
+        if numSelected > 1
+            int sortLimit = math.min(numSelected - 2, 6)
+            for rank = 0 to sortLimit
+                int   maxIdx = rank
+                float maxV   = array.get(selVols, rank)
+                for j = rank + 1 to numSelected - 1
+                    if array.get(selVols, j) > maxV
+                        maxV   := array.get(selVols, j)
+                        maxIdx := j
+                if maxIdx != rank
+                    float tmpV = array.get(selVols, rank)
+                    int   tmpI = array.get(selIdx,  rank)
+                    array.set(selVols, rank, array.get(selVols, maxIdx))
+                    array.set(selIdx,  rank, array.get(selIdx,  maxIdx))
+                    array.set(selVols, maxIdx, tmpV)
+                    array.set(selIdx,  maxIdx, tmpI)
+
+        if numSelected > 0
+            for rank = 0 to math.min(7, numSelected - 1)
+                int rowIdx = array.get(selIdx, rank)
+                array.set(vrvpTopPocIdx, rank, rowIdx)
+                float price = vrvpVisibleLow + (rowIdx * vrvpDispRowHeight) + (vrvpDispRowHeight / 2)
+                array.set(vrvpTopPocPrices, rank, price)
+
+        int startClear = math.max(0, numSelected)
+        if startClear < 8
+            for rank = startClear to 7
+                array.set(vrvpTopPocIdx,    rank, 0)
+                array.set(vrvpTopPocPrices, rank, na)
+
+    vrvpPocPrice := array.get(vrvpTopPocPrices, 0)
+    vrvpPocIdx   := array.get(vrvpTopPocIdx,    0)
+
+    // ── Value Area ──────────────────────────────────────────────────
+    float targetVol    = vrvpTotalVol * (vrvpVAPercent / 100.0)
+    float accVol       = array.get(vrvpRowTotalVol, vrvpPocIdx)
+    vrvpVahIdx := vrvpPocIdx
+    vrvpValIdx := vrvpPocIdx
+
+    while accVol < targetVol
+        float volAbove = vrvpVahIdx < vrvpDispRowCount - 1 ? array.get(vrvpRowTotalVol, vrvpVahIdx + 1) : 0.0
+        float volBelow = vrvpValIdx > 0                    ? array.get(vrvpRowTotalVol, vrvpValIdx - 1) : 0.0
+        if volAbove == 0 and volBelow == 0
+            break
+        if volAbove >= volBelow and vrvpVahIdx < vrvpDispRowCount - 1
+            vrvpVahIdx += 1
+            accVol     += volAbove
+        else if vrvpValIdx > 0
+            vrvpValIdx -= 1
+            accVol     += volBelow
+        else
+            break
+
+    vrvpVahPrice := vrvpVisibleLow + ((vrvpVahIdx + 1) * vrvpDispRowHeight)
+    vrvpValPrice := vrvpVisibleLow + (vrvpValIdx * vrvpDispRowHeight)
+
+    // ── RENDER ──────────────────────────────────────────────────────
+    while array.size(vrvpProfileBoxes) > 0
+        box.delete(array.pop(vrvpProfileBoxes))
+    while array.size(vrvpLevelLines) > 0
+        line.delete(array.pop(vrvpLevelLines))
+    while array.size(vrvpPriceLabels) > 0
+        label.delete(array.pop(vrvpPriceLabels))
+    if not na(vrvpStatsTable)
+        table.delete(vrvpStatsTable)
+
+    if vrvpShowProfile
+        float maxRowVol = 0.0
+        for i = 0 to vrvpDispRowCount - 1
+            maxRowVol := math.max(maxRowVol, array.get(vrvpRowTotalVol, i))
+
+        int profileWidthBars = math.max(10, math.round(vrvpVisibleBarCount * vrvpProfileWidth / 100))
+        int profileLeft      = vrvpLeftBarIdx
+        int profileRight     = vrvpLeftBarIdx + profileWidthBars
+
+        for i = 0 to vrvpDispRowCount - 1
+            float rowBottom = vrvpVisibleLow + (i * vrvpDispRowHeight)
+            float rowTop    = rowBottom + vrvpDispRowHeight
+            float rowVol    = array.get(vrvpRowTotalVol, i)
+            float uVol      = array.get(vrvpRowUpVol,    i)
+            float dVol      = array.get(vrvpRowDownVol,  i)
+
+            if rowVol > 0 and maxRowVol > 0
+                bool  inVA     = i >= vrvpValIdx and i <= vrvpVahIdx
+                float volRatio = rowVol / maxRowVol
+                int   barWidth = math.round(profileWidthBars * volRatio)
+
+                if vrvpDeltaIntensity
+                    float deltaRatio = (uVol - dVol) / rowVol
+                    float absRatio   = math.abs(deltaRatio)
+                    float boosted    = math.pow(absRatio, 1.0 / vrvpDeltaContrast)
+                    int   transp     = math.round((1 - boosted) * 85)
+                    color barColor   = deltaRatio >= 0
+                         ? color.new(vrvpDeltaBullColor, transp)
+                         : color.new(vrvpDeltaBearColor, transp)
+
+                    if vrvpPlacement == 'Right'
+                        array.push(vrvpProfileBoxes, box.new(profileRight - barWidth, rowTop, profileRight, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+                    else
+                        array.push(vrvpProfileBoxes, box.new(profileLeft, rowTop, profileLeft + barWidth, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+                else if vrvpVolumeMode == 'Up/Down'
+                    float upRatio   = uVol / maxRowVol
+                    float downRatio = dVol / maxRowVol
+                    int upWidth     = math.round(profileWidthBars * upRatio)
+                    int downWidth   = math.round(profileWidthBars * downRatio)
+                    color upColor   = inVA ? vrvpVAUpColor   : vrvpUpColor
+                    color downColor = inVA ? vrvpVADownColor  : vrvpDownColor
+                    color borderCol = color.black
+                    if vrvpPlacement == 'Right'
+                        if upWidth > 0
+                            array.push(vrvpProfileBoxes, box.new(profileRight - upWidth, rowTop, profileRight, rowBottom, border_color = borderCol, border_width = 1, bgcolor = upColor))
+                        if downWidth > 0
+                            array.push(vrvpProfileBoxes, box.new(profileRight - upWidth - downWidth, rowTop, profileRight - upWidth, rowBottom, border_color = borderCol, border_width = 1, bgcolor = downColor))
+                    else
+                        if upWidth > 0
+                            array.push(vrvpProfileBoxes, box.new(profileLeft, rowTop, profileLeft + upWidth, rowBottom, border_color = borderCol, border_width = 1, bgcolor = upColor))
+                        if downWidth > 0
+                            array.push(vrvpProfileBoxes, box.new(profileLeft + upWidth, rowTop, profileLeft + upWidth + downWidth, rowBottom, border_color = borderCol, border_width = 1, bgcolor = downColor))
+                else if vrvpVolumeMode == 'Total'
+                    color barColor = uVol >= dVol ? (inVA ? vrvpVAUpColor : vrvpUpColor) : (inVA ? vrvpVADownColor : vrvpDownColor)
+                    if vrvpPlacement == 'Right'
+                        array.push(vrvpProfileBoxes, box.new(profileRight - barWidth, rowTop, profileRight, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+                    else
+                        array.push(vrvpProfileBoxes, box.new(profileLeft, rowTop, profileLeft + barWidth, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+                else if vrvpVolumeMode == 'Delta'
+                    float dlt         = uVol - dVol
+                    float absDlt      = math.abs(dlt)
+                    float dltRatioAbs = absDlt / maxRowVol
+                    int   dltWidth    = math.round(profileWidthBars * dltRatioAbs)
+                    color barColor    = dlt >= 0 ? (inVA ? vrvpVAUpColor : vrvpUpColor) : (inVA ? vrvpVADownColor : vrvpDownColor)
+                    if vrvpPlacement == 'Right'
+                        array.push(vrvpProfileBoxes, box.new(profileRight - dltWidth, rowTop, profileRight, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+                    else
+                        array.push(vrvpProfileBoxes, box.new(profileLeft, rowTop, profileLeft + dltWidth, rowBottom, border_color = color.new(barColor, 50), bgcolor = barColor))
+
+        // ── POC / VAH / VAL lines ───────────────────────────────────
+        int lineLeft  = vrvpLeftBarIdx
+        int lineRight = bar_index + 2
+
+        for rank = 0 to vrvpPocCount - 1
+            float price = array.get(vrvpTopPocPrices, rank)
+            if not na(price)
+                color lineColor = switch rank
+                    0 => vrvpPOCColor
+                    1 => vrvpPoc2Color
+                    2 => vrvpPoc3Color
+                    3 => vrvpPoc4Color
+                    4 => vrvpPoc5Color
+                    5 => vrvpPoc6Color
+                    6 => vrvpPoc7Color
+                    7 => vrvpPoc8Color
+                    => vrvpPOCColor
+                string styleStr = rank == 0 ? vrvpPOCStyle : vrvpPoc234Style
+                bool showThis   = rank == 0 ? vrvpShowPOC : true
+                if showThis
+                    array.push(vrvpLevelLines, line.new(lineLeft, price, lineRight, price,
+                         color = lineColor, style = f_getLineStyle(styleStr), width = 1))
+
+                    if vrvpShowPocLabels
+                        string lblTxt = rank == 0 ? 'POC ' : 'POC' + str.tostring(rank + 1) + ' '
+                        lblTxt += str.tostring(price, format.mintick)
+                        array.push(vrvpPriceLabels, label.new(bar_index + 2, price, lblTxt,
+                             style = label.style_label_left, color = color.new(color.black, 100), textcolor = lineColor, size = f_getSize(vrvpPocLabelSize)))
+
+
+        if vrvpShowVAH and not na(vrvpVahPrice)
+            array.push(vrvpLevelLines, line.new(lineLeft, vrvpVahPrice, lineRight, vrvpVahPrice,
+                 color = vrvpVAHColor, style = f_getLineStyle(vrvpVAHStyle), width = 1))
+        if vrvpShowVAL and not na(vrvpValPrice)
+            array.push(vrvpLevelLines, line.new(lineLeft, vrvpValPrice, lineRight, vrvpValPrice,
+                 color = vrvpVALColor, style = f_getLineStyle(vrvpVALStyle), width = 1))
+
+        if vrvpShowPriceLabels
+            int priceLabelX = bar_index + 2
+
+            if vrvpShowPOC and not na(vrvpPocPrice)
+                array.push(vrvpPriceLabels, label.new(priceLabelX, vrvpPocPrice, str.tostring(vrvpPocPrice, format.mintick),
+                     xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_left, color = color.new(color.black, 100), textcolor = vrvpPOCColor, size = size.small))
+            if vrvpShowVAH and not na(vrvpVahPrice)
+                array.push(vrvpPriceLabels, label.new(priceLabelX, vrvpVahPrice, str.tostring(vrvpVahPrice, format.mintick),
+                     xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_left, color = color.new(color.black, 100), textcolor = vrvpVAHColor, size = size.small))
+            if vrvpShowVAL and not na(vrvpValPrice)
+                array.push(vrvpPriceLabels, label.new(priceLabelX, vrvpValPrice, str.tostring(vrvpValPrice, format.mintick),
+                     xloc = xloc.bar_index, yloc = yloc.price, style = label.style_label_left, color = color.new(color.black, 100), textcolor = vrvpVALColor, size = size.small))
+
+    // ── VRVP Stats Table ────────────────────────────────────────────
+    if vrvpShowStats
+        vrvpStatsTable := table.new(f_getTablePos(vrvpTablePosition), 2, 7,
+             bgcolor = color.new(color.black, 30), border_width = 1, border_color = color.gray)
+        table.cell(vrvpStatsTable, 0, 0, 'VRVP', text_color = color.white, text_size = f_getSize(vrvpTableSize), bgcolor = color.new(color.blue, 70), text_halign = text.align_right)
+        table.cell(vrvpStatsTable, 1, 0, 'v5',   text_color = color.white, text_size = f_getSize(vrvpTableSize), bgcolor = color.new(color.blue, 70), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 0, 1, 'Bars:', text_color = color.gray, text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 1, 1, str.tostring(vrvpVisibleBarCount), text_color = color.white, text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
+        table.cell(vrvpStatsTable, 0, 2, 'Volume:', text_color = color.gray, text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 1, 2, f_formatVolume(vrvpTotalVol), text_color = color.white, text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
+        float upPct   = vrvpTotalVol > 0 ? (vrvpTotalUpVol   / vrvpTotalVol) * 100 : 0
+        float downPct = vrvpTotalVol > 0 ? (vrvpTotalDownVol / vrvpTotalVol) * 100 : 0
+        table.cell(vrvpStatsTable, 0, 3, 'Up Vol:',   text_color = color.gray,     text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 1, 3, str.tostring(upPct, '#.#') + '%', text_color = vrvpUpColor, text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
+        table.cell(vrvpStatsTable, 0, 4, 'Down Vol:', text_color = color.gray,     text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 1, 4, str.tostring(downPct, '#.#') + '%', text_color = vrvpDownColor, text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
+        float vsPoc    = not na(vrvpPocPrice) and vrvpPocPrice != 0 ? ((close - vrvpPocPrice) / vrvpPocPrice) * 100 : 0
+        string vsPocStr = (vsPoc >= 0 ? '+' : '') + str.tostring(vsPoc, '#.##') + '%'
+        color  vsPocCol = vsPoc >= 0 ? vrvpUpColor : vrvpDownColor
+        table.cell(vrvpStatsTable, 0, 5, 'vs POC:', text_color = color.gray, text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        table.cell(vrvpStatsTable, 1, 5, vsPocStr,  text_color = vsPocCol,   text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
+        table.cell(vrvpStatsTable, 0, 6, 'Method:', text_color = color.gray, text_size = f_getSize(vrvpTableSize), text_halign = text.align_left)
+        string methodStr = vrvpVolDistribution == 'Typical Price Weighted' ? 'TPO' : vrvpVolDistribution == 'Close Weighted' ? 'Close' : 'Uniform'
+        table.cell(vrvpStatsTable, 1, 6, methodStr, text_color = color.yellow, text_size = f_getSize(vrvpTableSize), text_halign = text.align_right)
