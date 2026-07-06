@@ -1,0 +1,33 @@
+//@version=6
+indicator('IPO VWAP', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showOriginVWAP   = input.bool(true,      'Show IPO VWAP', group = 'IPO VWAP')
+originVWAPColor  = input.color(color.red, 'VWAP Color',    group = 'IPO VWAP')
+originVWAPWidth  = input.int(1, 'VWAP Line Width', minval = 1, maxval = 4, group = 'IPO VWAP')
+
+// ═══════════════════════════════════════════════════════════════════════
+// CUMULATIVE VWAP FROM THE FIRST AVAILABLE BAR (i.e. since listing/IPO)
+// ═══════════════════════════════════════════════════════════════════════
+_d_cumPV = request.security(syminfo.tickerid, 'D',
+     ta.cum(nz((high + low + close) / 3, 0.0) * nz(volume, 0.0)),
+     lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+_d_cumV  = request.security(syminfo.tickerid, 'D',
+     ta.cum(nz(volume, 0.0)),
+     lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+
+// Only show if the asset actually has volume data
+_hasVolume = not na(_d_cumV) and _d_cumV > 0
+originVWAP = _hasVolume ? _d_cumPV / _d_cumV : float(na)
+
+plot(showOriginVWAP ? originVWAP : na,
+     title = 'IPO VWAP', color = originVWAPColor, linewidth = originVWAPWidth)
+
+if showOriginVWAP and not na(originVWAP) and barstate.islast
+    label.new(bar_index, originVWAP, 'IPO VWAP',
+         color     = color.new(originVWAPColor, 70),
+         textcolor = color.white,
+         style     = label.style_label_left,
+         size      = size.tiny)
