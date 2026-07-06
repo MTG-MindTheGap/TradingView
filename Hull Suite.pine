@@ -1,0 +1,74 @@
+//@version=6
+indicator('Hull Suite', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+hullSrc         = input.source(close, 'Source',                                                    group = 'Hull Suite')
+hullMode        = input.string('Hma', 'Hull Variation', options = ['Hma', 'Thma', 'Ehma'],         group = 'Hull Suite')
+hullLength      = input.int(55,       'Length',          minval = 1,                               group = 'Hull Suite')
+hullLengthMult  = input.float(1.0,    'Length Multiplier',               step = 0.1,               group = 'Hull Suite')
+hullBand        = input.bool(true,    'Show as Band',                                              group = 'Hull Suite')
+hullThickness   = input.int(1,        'Line Thickness',  minval = 1, maxval = 5,                   group = 'Hull Suite')
+hullTransp      = input.int(40,       'Band Transparency', minval = 0, maxval = 100, step = 5,     group = 'Hull Suite')
+hullSwitchColor = input.bool(true,    'Color by Trend',                                            group = 'Hull Suite')
+hullBullColor   = input.color(color.new(color.green,  0), 'Bull Color',    group = 'Hull Suite')
+hullBearColor   = input.color(color.new(color.red,    0), 'Bear Color',    group = 'Hull Suite')
+hullNeutralColor= input.color(color.new(color.orange, 0), 'Neutral Color', group = 'Hull Suite')
+hullCandleCol   = input.bool(false,   'Color Candles by Hull Trend',                               group = 'Hull Suite')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HULL VARIATIONS
+// ═══════════════════════════════════════════════════════════════════════
+HMA(_src, _length) =>
+    ta.wma(2 * ta.wma(_src, _length / 2) - ta.wma(_src, _length), math.round(math.sqrt(_length)))
+
+EHMA(_src, _length) =>
+    ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+
+THMA(_src, _length) =>
+    ta.wma(ta.wma(_src, _length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+
+HullMode(_mode, _src, _len) =>
+    switch _mode
+        'Hma'  => HMA(_src, _len)
+        'Ehma' => EHMA(_src, _len)
+        'Thma' => THMA(_src, _len / 2)
+        =>        float(na)
+
+// ═══════════════════════════════════════════════════════════════════════
+// CALCULATION
+// ═══════════════════════════════════════════════════════════════════════
+HULL  = HullMode(hullMode, hullSrc, int(hullLength * hullLengthMult))
+MHULL = HULL
+SHULL = HULL[2]
+
+hullTrending = not na(HULL) and not na(HULL[2]) and HULL > HULL[2]
+hullColor    = hullSwitchColor
+     ? (hullTrending ? hullBullColor : hullBearColor)
+     : hullNeutralColor
+
+hullCrossUp   = ta.crossover(MHULL, SHULL)
+hullCrossDown = ta.crossover(SHULL, MHULL)
+
+// ═══════════════════════════════════════════════════════════════════════
+// PLOTS
+// ═══════════════════════════════════════════════════════════════════════
+hFi1 = plot(MHULL,
+     title     = 'MHULL',
+     color     = color.new(hullColor, 50),
+     linewidth = hullThickness)
+
+hFi2 = plot(hullBand ? SHULL : na,
+     title     = 'SHULL',
+     color     = hullBand ? color.new(hullColor, 50) : na,
+     linewidth = hullThickness)
+
+fill(hFi1, hFi2,
+     title = 'Hull Band',
+     color = hullBand ? color.new(hullColor, hullTransp) : na)
+
+barcolor(hullCandleCol ? (hullSwitchColor ? hullColor : na) : na, title = 'Hull Candle Color')
+
+alertcondition(hullCrossUp,   'Hull Trending Up',   'Hull MA trending up.')
+alertcondition(hullCrossDown, 'Hull Trending Down', 'Hull MA trending down.')
