@@ -1,0 +1,205 @@
+//@version=6
+indicator("Abs Distance MA", shorttitle="AbsDist+", overlay=false)
+
+// ══════════════════════════════════════════════════════════════
+// TIMEFRAME-AWARE AUTO SD LOOKBACK
+// ══════════════════════════════════════════════════════════════
+tf_seconds = timeframe.in_seconds()
+
+auto_sd_len = tf_seconds <= 3600   ? 1000 :
+              tf_seconds <= 14400  ? 500  :
+              tf_seconds <= 86400  ? 252  :
+              tf_seconds <= 1209600 ? 200  :
+              200
+
+// ══════════════════════════════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════════════════════════════
+grp1 = "── Core Settings ──"
+ma_length    = input.int(200,    "MA Length",                   group=grp1)
+ma_type      = input.string("SMA","MA Type",                   group=grp1, options=["SMA","EMA","WMA","RMA"])
+use_auto_sd  = input.bool(true,  "Auto SD Lookback (by TF)",   group=grp1)
+sd_length    = input.int(200,    "SD Lookback (manual override)", group=grp1)
+use_dynamic  = input.bool(true,  "Dynamic Threshold",           group=grp1)
+fixed_level  = input.float(50.0, "Fixed Threshold",             group=grp1)
+
+// Resolve which SD length to actually use
+sd_len = use_auto_sd ? auto_sd_len : sd_length
+
+grp2 = "── Divergence ──"
+div_lookback  = input.int(14,    "Pivot Lookback",          group=grp2, minval=3, maxval=50)
+show_bull_div = input.bool(true, "Show Bullish Divergence", group=grp2)
+show_bear_div = input.bool(true, "Show Bearish Divergence", group=grp2)
+
+grp3 = "── Momentum & Slope ──"
+show_momentum = input.bool(true,  "Show Momentum Fill", group=grp3)
+mom_length    = input.int(5,      "Momentum Length",    group=grp3, minval=1)
+show_slope    = input.bool(true,  "Show Slope Arrows",  group=grp3)
+slope_thresh  = input.float(0.05, "Slope Sensitivity",  group=grp3, step=0.01)
+
+grp4 = "── Regime Bands ──"
+show_bands  = input.bool(true, "Show SD Bands",    group=grp4)
+show_zscore = input.bool(true, "Show Z-Score Line", group=grp4)
+
+grp5 = "── Alerts ──"
+alert_div    = input.bool(true, "Alert on Divergence",      group=grp5)
+alert_thresh = input.bool(true, "Alert on Threshold Cross", group=grp5)
+
+// ══════════════════════════════════════════════════════════════
+// CORE CALCULATION
+// ══════════════════════════════════════════════════════════════
+ma = switch ma_type
+    "SMA" => ta.sma(close, ma_length)
+    "EMA" => ta.ema(close, ma_length)
+    "WMA" => ta.wma(close, ma_length)
+    "RMA" => ta.rma(close, ma_length)
+
+pct_dist   = math.abs(close - ma) / ma * 100
+avg_dist   = ta.sma(pct_dist, sd_len)
+sd_dist    = ta.stdev(pct_dist, sd_len)
+threshold  = use_dynamic ? avg_dist + sd_dist : fixed_level
+z_score    = sd_dist != 0 ? (pct_dist - avg_dist) / sd_dist : 0
+dist_mom   = pct_dist - pct_dist[mom_length]
+dist_slope = ta.ema(pct_dist, 3) - ta.ema(pct_dist, 3)[2]
+
+band_1sd = avg_dist + sd_dist
+band_2sd = avg_dist + (sd_dist * 2)
+band_3sd = avg_dist + (sd_dist * 3)
+band_neg = math.max(avg_dist - sd_dist, 0)
+
+// ══════════════════════════════════════════════════════════════
+// ACTIVE SD LENGTH LABEL (top-right)
+// ══════════════════════════════════════════════════════════════
+tf_label = tf_seconds <= 3600   ? "1H → SD:1000"  :
+           tf_seconds <= 14400  ? "4H → SD:500"   :
+           tf_seconds <= 86400  ? "1D → SD:252"   :
+           tf_seconds <= 1209600 ? "1W → SD:200"   :
+           "≥2W → SD:200"
+
+if barstate.islast and use_auto_sd
+    label.new(bar_index, threshold,
+         text=tf_label,
+         style=label.style_label_left,
+         color=color.new(color.gray, 70),
+         textcolor=color.white,
+         size=size.small)
+
+// ══════════════════════════════════════════════════════════════
+// DIVERGENCE DETECTION
+// ══════════════════════════════════════════════════════════════
+price_ph = ta.pivothigh(close,    div_lookback, div_lookback)
+price_pl = ta.pivotlow(close,     div_lookback, div_lookback)
+dist_ph  = ta.pivothigh(pct_dist, div_lookback, div_lookback)
+dist_pl  = ta.pivotlow(pct_dist,  div_lookback, div_lookback)
+
+var float last_price_ph = na
+var float last_price_pl = na
+var float last_dist_ph  = na
+var float last_dist_pl  = na
+
+if not na(price_ph)
+    last_price_ph := price_ph
+if not na(price_pl)
+    last_price_pl := price_pl
+if not na(dist_ph)
+    last_dist_ph  := dist_ph
+if not na(dist_pl)
+    last_dist_pl  := dist_pl
+
+bear_div = show_bear_div and
+     not na(last_price_ph) and not na(last_dist_ph) and
+     not na(price_ph) and not na(dist_ph) and
+     price_ph > last_price_ph and dist_ph < last_dist_ph
+
+bull_div = show_bull_div and
+     not na(last_price_pl) and not na(last_dist_pl) and
+     not na(price_pl) and not na(dist_pl) and
+     price_pl < last_price_pl and dist_pl < last_dist_pl
+
+// ══════════════════════════════════════════════════════════════
+// COLORS
+// ══════════════════════════════════════════════════════════════
+is_extreme = pct_dist >= threshold
+is_2sd     = pct_dist >= band_2sd
+is_comp    = pct_dist <= band_neg
+
+col_red1   = color.rgb(255, 41,  82)
+col_red2   = color.rgb(255, 92,  122)
+col_cyan   = color.rgb(0,   229, 255)
+col_orange = color.rgb(255, 165, 0)
+col_purple = color.rgb(178, 102, 255)
+col_pink   = color.rgb(255, 92,  122)
+
+line_col = is_2sd ? color.new(col_red1, 0) : is_extreme ? color.new(col_red2, 0) : is_comp ? color.new(col_cyan, 0) : color.new(col_orange, 0)
+
+mom_col_up = color.new(color.lime, 70)
+mom_col_dn = color.new(color.red,  70)
+
+// ══════════════════════════════════════════════════════════════
+// PLOTS — BANDS
+// ══════════════════════════════════════════════════════════════
+p_2sd = plot(show_bands ? band_2sd : na, "2 SD Band",  color=color.new(color.red,  75), linewidth=1)
+p_thr = plot(threshold,                  "Threshold",  color=color.white,                linewidth=2)
+p_avg = plot(avg_dist,                   "Mean",       color=color.new(color.gray, 50),  linewidth=1)
+p_neg = plot(show_bands ? band_neg : na, "-1 SD Band", color=color.new(color.teal, 75),  linewidth=1)
+p_3sd = plot(show_bands ? band_3sd : na, "3 SD Band",  color=color.new(color.red,  90),  display=display.none)
+
+fill(p_thr, p_2sd, color=color.new(color.red, 95), title="1–2 SD Zone")
+fill(p_2sd, p_3sd, color=color.new(color.red, 90), title="2SD+ Zone")
+
+// ══════════════════════════════════════════════════════════════
+// PLOTS — MAIN LINE + MOMENTUM
+// ══════════════════════════════════════════════════════════════
+p_dist = plot(pct_dist, "Abs % Distance", color=line_col, linewidth=2)
+p_mom  = plot(show_momentum ? ta.ema(pct_dist, mom_length) : na, "Momentum EMA", color=color.new(color.gray, 80), linewidth=1)
+
+fill(p_dist, p_mom, color=dist_mom > 0 ? mom_col_dn : mom_col_up, title="Momentum Fill")
+
+// ══════════════════════════════════════════════════════════════
+// PLOTS — Z-SCORE
+// ══════════════════════════════════════════════════════════════
+z_scaled = show_zscore ? (z_score * (band_1sd * 0.15)) + band_neg * 0.5 : na
+plot(z_scaled, "Z-Score (scaled)", color=color.new(col_purple, 70), linewidth=1, style=plot.style_area)
+
+// ══════════════════════════════════════════════════════════════
+// SLOPE ARROWS
+// ══════════════════════════════════════════════════════════════
+plotshape(show_slope and dist_slope > slope_thresh and dist_slope[1] <= slope_thresh,
+     title="Slope Up", style=shape.triangleup, location=location.bottom,
+     color=color.lime, size=size.tiny)
+
+plotshape(show_slope and dist_slope < -slope_thresh and dist_slope[1] >= -slope_thresh,
+     title="Slope Down", style=shape.triangledown, location=location.top,
+     color=color.red, size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════
+// DIVERGENCE MARKERS
+// ══════════════════════════════════════════════════════════════
+plotshape(bear_div, title="Bearish Div",
+     style=shape.labeldown, location=location.top,
+     color=color.new(col_red1, 0), textcolor=color.white,
+     text="BD", size=size.small)
+
+plotshape(bull_div, title="Bullish Div",
+     style=shape.labelup, location=location.bottom,
+     color=color.new(col_cyan, 0), textcolor=color.black,
+     text="BU", size=size.small)
+
+// ══════════════════════════════════════════════════════════════
+// ZERO LINE & BACKGROUND
+// ══════════════════════════════════════════════════════════════
+hline(0, "Zero", color=color.new(col_pink, 70), linestyle=hline.style_dotted)
+
+bg_color = is_2sd ? color.new(color.red, 88) : is_extreme ? color.new(color.red, 94) : is_comp ? color.new(color.teal, 94) : na
+bgcolor(bg_color, title="Zone Background")
+
+// ══════════════════════════════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════════════════════════════
+cross_up   = ta.crossover(pct_dist, threshold)
+cross_down = ta.crossunder(pct_dist, threshold)
+
+alertcondition(alert_thresh and cross_up,   "Threshold Cross Up",   "AbsDist crossed above threshold — overextension alert")
+alertcondition(alert_thresh and cross_down, "Threshold Cross Down", "AbsDist dropped below threshold — cooling off")
+alertcondition(alert_div and bear_div,      "Bearish Divergence",   "AbsDist: Bearish divergence detected")
+alertcondition(alert_div and bull_div,      "Bullish Divergence",   "AbsDist: Bullish divergence detected")
