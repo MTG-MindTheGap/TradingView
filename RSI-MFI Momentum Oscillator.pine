@@ -1,0 +1,103 @@
+//@version=6
+indicator("RSI/MFI Momentum Oscillator", shorttitle="GMO", overlay=false, max_bars_back=500)
+
+// ─────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────
+grpCore = "Core"
+len         = input.int(14, "RSI / MFI Length", minval=1, group=grpCore)
+src         = input.source(close, "RSI Source", group=grpCore)
+
+grpEngine = "Momentum Engine"
+fastLen    = input.int(12, "Fast Length", minval=1, group=grpEngine)
+slowLen    = input.int(26, "Slow Length", minval=2, group=grpEngine)
+signalLen  = input.int(9, "Signal Length", minval=1, group=grpEngine)
+confirmPow = input.float(1.0, "MFI Confirmation Weight", minval=0.1, maxval=3.0, step=0.1, group=grpEngine)
+
+grpDisplay = "Display"
+showHist   = input.bool(true, "Show Histogram", group=grpDisplay)
+showSignal = input.bool(true, "Show Signal", group=grpDisplay)
+showRaw    = input.bool(false, "Show Raw Genuine Momentum", group=grpDisplay)
+
+grpColor = "Colors"
+colBull    = input.color(color.lime, "Bullish", group=grpColor)
+colBear    = input.color(color.red, "Bearish", group=grpColor)
+colOsc     = input.color(color.white, "Oscillator", group=grpColor)
+colSignal  = input.color(color.yellow, "Signal", group=grpColor)
+colRaw     = input.color(color.aqua, "Raw Momentum", group=grpColor)
+colZero    = input.color(color.new(color.gray, 50), "Zero Line", group=grpColor)
+
+// ─────────────────────────────────────────────
+// Core logic
+// RSI = momentum structure
+// MFI = confirmation / participation
+// Higher = more genuine bullish momentum
+// Lower = more genuine bearish momentum
+// ─────────────────────────────────────────────
+rsiVal = ta.rsi(src, len)
+mfiVal = ta.mfi(hlc3, len)
+
+rsiBias = rsiVal - 50.0
+mfiConfirm = (mfiVal - 50.0) / 50.0
+
+rawGenuine = rsiBias * (1 + mfiConfirm * confirmPow)
+
+fast   = ta.ema(rawGenuine, fastLen)
+slow   = ta.ema(rawGenuine, slowLen)
+osc    = fast - slow
+signal = ta.ema(osc, signalLen)
+hist   = osc - signal
+
+histUp    = hist > hist[1]
+aboveZero = hist >= 0
+
+histColor =
+     aboveZero and histUp      ? color.new(colBull, 0) :
+     aboveZero and not histUp  ? color.new(colBull, 60) :
+     not aboveZero and not histUp ? color.new(colBear, 0) :
+     color.new(colBear, 60)
+
+oscColor = osc >= 0 ? color.new(colBull, 0) : color.new(colBear, 0)
+
+// ─────────────────────────────────────────────
+// Plots
+// ─────────────────────────────────────────────
+hline(0, "Zero", color=colZero, linestyle=hline.style_dotted)
+
+plot(showHist ? hist : na,
+     title="Hist",
+     style=plot.style_columns,
+     color=histColor,
+     linewidth=1)
+
+plot(osc,
+     title="Osc",
+     color=colOsc,
+     linewidth=1)
+
+plot(showSignal ? signal : na,
+     title="Signal",
+     color=colSignal,
+     linewidth=1)
+
+plot(showRaw ? rawGenuine : na,
+     title="Raw",
+     color=colRaw,
+     linewidth=1)
+
+// ─────────────────────────────────────────────
+// Alerts
+// ─────────────────────────────────────────────
+bullZeroCross   = ta.crossover(osc, 0)
+bearZeroCross   = ta.crossunder(osc, 0)
+bullSignalCross = ta.crossover(osc, signal)
+bearSignalCross = ta.crossunder(osc, signal)
+histTurnUp      = hist > hist[1] and hist[1] <= hist[2]
+histTurnDn      = hist < hist[1] and hist[1] >= hist[2]
+
+alertcondition(bullZeroCross, "Bullish Zero Cross", "Genuine Momentum Oscillator crossed above zero")
+alertcondition(bearZeroCross, "Bearish Zero Cross", "Genuine Momentum Oscillator crossed below zero")
+alertcondition(bullSignalCross, "Bullish Signal Cross", "Oscillator crossed above signal")
+alertcondition(bearSignalCross, "Bearish Signal Cross", "Oscillator crossed below signal")
+alertcondition(histTurnUp, "Histogram Turning Up", "Histogram has turned upward")
+alertcondition(histTurnDn, "Histogram Turning Down", "Histogram has turned downward")
