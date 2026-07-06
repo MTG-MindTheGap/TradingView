@@ -1,10 +1,6 @@
 # TradingView Indicators
 
-A collection of original Pine Script v5/v6 indicators, kept here as `.pine`
-files (paste directly into the TradingView Pine Editor) ahead of
-publishing to GitHub and the TradingView public library.
-
-Each indicator is a single, self-contained script — no file depends on
+A collection of original Pine Script v5/v6 indicators, kept here as `.pine` files (paste directly into the TradingView Pine Editor). Each indicator is a single, self-contained script — no file depends on
 another.
 
 ## Trend & Moving Averages
@@ -57,6 +53,4 @@ another.
 | [`Moon Cycles.pine`](Moon%20Cycles.pine) | Marks new/first-quarter/full/last-quarter lunar phases on the chart. |
 
 ## Usage
-Each file is a complete Pine Script. Open the TradingView Pine Editor, paste
-the contents of a `.pine` file, and click "Add to Chart." No file requires any
-other file in this repo.
+Each file is a complete Pine Script. Open the TradingView Pine Editor, paste the contents of a `.pine` file, and click "Add to Chart." No file requires any other file in this repo.
