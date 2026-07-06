@@ -1,0 +1,47 @@
+//@version=6
+indicator('ATR Signal', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+atr_len                 = input.int(14,       'ATR Length',              group = 'ATR Signal')
+price_source            = input.source(close, 'Price Source',            group = 'ATR Signal')
+atrPerMultipleThreshold = input.int(12,       'ATR% Multiple Threshold', group = 'ATR Signal')
+dotColor                = input.color(color.red, 'Signal Dot Color',     group = 'ATR Signal')
+dailyMALength           = input.int(21,       'MA Length',
+     minval = 1, maxval = 5000, group = 'ATR Signal')
+dailyMAType             = input.string('EMA', 'MA Type',
+     options = ['SMA', 'EMA', 'RMA', 'VWMA', 'WMA'], group = 'ATR Signal')
+dailyMASource           = input.source(close, 'MA Source', group = 'ATR Signal')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+getMA(src, length, maType) =>
+    _ema  = ta.ema(src, length)
+    _rma  = ta.rma(src, length)
+    _vwma = na(volume) or volume == 0 ? ta.ema(src, length) : ta.vwma(src, length)
+    _wma  = ta.wma(src, length)
+    _sma  = ta.sma(src, length)
+    switch maType
+        'EMA'  => _ema
+        'RMA'  => _rma
+        'VWMA' => _vwma
+        'WMA'  => _wma
+        =>        _sma
+
+// ═══════════════════════════════════════════════════════════════════════
+// SIGNAL — flags when price has stretched more than N ATR%-multiples away
+// from its moving average
+// ═══════════════════════════════════════════════════════════════════════
+atr  = nz(ta.atr(atr_len), 1.0)
+atrp = close > 0 ? 100.0 * atr / close : 1.0
+
+mvg = getMA(dailyMASource, dailyMALength, dailyMAType)
+atrPerMultiple = (not na(mvg) and mvg > 0 and atrp > 0) ?
+     100.0 * (price_source - mvg) / mvg / atrp : 0.0
+atrSellIndicator = atrPerMultiple > atrPerMultipleThreshold
+
+plotshape(atrSellIndicator, style = shape.circle, location = location.abovebar, color = dotColor)
+
+alertcondition(atrSellIndicator, 'ATR Extension Signal', 'Price extended beyond ATR% multiple threshold')
