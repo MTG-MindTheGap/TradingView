@@ -1,0 +1,85 @@
+//@version=6
+indicator('Volume Nodes (HVN/LVN) Tracker', overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// HVN INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showHVN       = input.bool(true, 'Show HVN Levels',          group = 'HVN Tracker')
+hvnLookback   = input.int(200,   'HVN Lookback (bars)',       minval = 10, maxval = 500, group = 'HVN Tracker')
+hvnTopN       = input.int(3,     'Top N HVN Levels to Show', minval = 1,  maxval = 5,   group = 'HVN Tracker')
+hvnLineColor  = input.color(color.new(color.blue, 30), 'HVN Line Color',  group = 'HVN Tracker')
+hvnLineWidth  = input.int(1,     'HVN Line Width', minval = 1, maxval = 4, group = 'HVN Tracker')
+hvnLabelColor = input.color(color.blue, 'HVN Label Color',   group = 'HVN Tracker')
+hvnLabelSize  = input.string('tiny', 'HVN Label Size',
+     options = ['tiny', 'small', 'normal', 'large'], group = 'HVN Tracker')
+hvnExtendBars = input.int(10, 'Extend HVN Lines (bars)', minval = 1, maxval = 100, group = 'HVN Tracker')
+
+// ═══════════════════════════════════════════════════════════════════════
+// LVN INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showLVN       = input.bool(true, 'Show LVN Levels',          group = 'LVN Tracker')
+lvnLookback   = input.int(200,   'LVN Lookback (bars)',       minval = 10, maxval = 500, group = 'LVN Tracker')
+lvnTopN       = input.int(3,     'Top N LVN Levels to Show', minval = 1,  maxval = 5,   group = 'LVN Tracker')
+lvnLineColor  = input.color(color.new(color.fuchsia, 30), 'LVN Line Color',  group = 'LVN Tracker')
+lvnLineWidth  = input.int(1,     'LVN Line Width', minval = 1, maxval = 4,   group = 'LVN Tracker')
+lvnLabelColor = input.color(color.fuchsia, 'LVN Label Color', group = 'LVN Tracker')
+lvnLabelSize  = input.string('tiny', 'LVN Label Size',
+     options = ['tiny', 'small', 'normal', 'large'], group = 'LVN Tracker')
+lvnExtendBars = input.int(10, 'Extend LVN Lines (bars)', minval = 1, maxval = 100, group = 'LVN Tracker')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'small'  => size.small
+        'normal' => size.normal
+        'large'  => size.large
+        =>          size.tiny
+
+// ═══════════════════════════════════════════════════════════════════════
+// HVN — highest-volume bars in the lookback window (proxy for high-volume nodes)
+// ═══════════════════════════════════════════════════════════════════════
+if showHVN and barstate.islast
+    float[] hvnVols   = array.new_float(hvnLookback)
+    float[] hvnPrices = array.new_float(hvnLookback)
+    for i = 0 to hvnLookback - 1
+        array.set(hvnVols,   i, nz(volume[i]))
+        array.set(hvnPrices, i, (high[i] + low[i]) / 2)
+    int[] hvnIdx = array.sort_indices(hvnVols, order.descending)
+    hvnLblSz     = f_getSize(hvnLabelSize)
+    plotCount    = math.min(hvnTopN, hvnLookback)
+    for i = 0 to plotCount - 1
+        idx   = array.get(hvnIdx, i)
+        price = array.get(hvnPrices, idx)
+        line.new(bar_index - hvnLookback, price, bar_index + hvnExtendBars, price,
+             color = hvnLineColor, width = hvnLineWidth, style = line.style_dashed)
+        label.new(bar_index + hvnExtendBars, price, 'HVN ' + str.tostring(i + 1),
+             color     = color.new(hvnLabelColor, 70),
+             textcolor = hvnLabelColor,
+             style     = label.style_label_left,
+             size      = hvnLblSz)
+
+// ═══════════════════════════════════════════════════════════════════════
+// LVN — lowest-volume bars in the lookback window (proxy for low-volume nodes)
+// ═══════════════════════════════════════════════════════════════════════
+if showLVN and barstate.islast
+    float[] lvnVols   = array.new_float(lvnLookback)
+    float[] lvnPrices = array.new_float(lvnLookback)
+    for i = 0 to lvnLookback - 1
+        array.set(lvnVols,   i, nz(volume[i]))
+        array.set(lvnPrices, i, (high[i] + low[i]) / 2)
+    int[] lvnIdx = array.sort_indices(lvnVols, order.ascending)
+    lvnLblSz     = f_getSize(lvnLabelSize)
+    plotCount    = math.min(lvnTopN, lvnLookback)
+    for i = 0 to plotCount - 1
+        idx   = array.get(lvnIdx, i)
+        price = array.get(lvnPrices, idx)
+        line.new(bar_index - lvnLookback, price, bar_index + lvnExtendBars, price,
+             color = lvnLineColor, width = lvnLineWidth, style = line.style_dotted)
+        label.new(bar_index + lvnExtendBars, price, 'LVN ' + str.tostring(i + 1),
+             color     = color.new(lvnLabelColor, 70),
+             textcolor = lvnLabelColor,
+             style     = label.style_label_left,
+             size      = lvnLblSz)
