@@ -1,0 +1,78 @@
+//@version=6
+indicator("Pivot Points", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ─── INPUTS ───
+show4H = input.bool(false, "4H",      group = "Show")
+showD  = input.bool(true,  "Daily",   group = "Show")
+showW  = input.bool(true,  "Weekly",  group = "Show")
+showM  = input.bool(false, "Monthly", group = "Show")
+showY  = input.bool(false, "Yearly",  group = "Show")
+
+col4H = input.color(color.gray,   "4H",      group = "Colors")
+colD  = input.color(color.blue,   "Daily",   group = "Colors")
+colW  = input.color(color.orange, "Weekly",  group = "Colors")
+colM  = input.color(color.purple, "Monthly", group = "Colors")
+colY  = input.color(color.red,    "Yearly",  group = "Colors")
+
+// ─── LABEL SETTINGS ───
+labelPos   = input.string("Right", "Position", options = ["Left", "Right"], group = "Labels")
+labelColor = input.color(color.white, "Text Color", group = "Labels")
+
+// ─── DRAW ───
+draw(lvl, lbl, col) =>
+    line.new(bar_index - 1, lvl, bar_index, lvl, extend = extend.both, color = col, width = 1)
+    if labelPos == "Right"
+        // far future timestamp pushes label off the right edge
+        label.new(time + (time - time[1]) * 1, lvl, lbl,
+             xloc      = xloc.bar_time,
+             color     = color.new(color.black, 100),
+             textcolor = labelColor,
+             style     = label.style_label_left,
+             size      = size.small)
+    else
+        // earliest visible timestamp — time of the first bar on chart
+        label.new(time[bar_index - 1], lvl, lbl,
+             xloc      = xloc.bar_time,
+             color     = color.new(color.black, 100),
+             textcolor = labelColor,
+             style     = label.style_label_right,
+             size      = size.small)
+
+// ─── DATA ───
+[h4h, h4l, h4c] = request.security("", "240", [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[dh,  dl,  dc]  = request.security("", "1D",  [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[wh,  wl,  wc]  = request.security("", "1W",  [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[mh,  ml,  mc]  = request.security("", "1M",  [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+[yh,  yl,  yc]  = request.security("", "12M", [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+
+// ─── DRAW ON LAST BAR ONLY ───
+if barstate.islast
+    if show4H
+        pp = (h4h + h4l + h4c) / 3
+        draw(pp,         "4H PP", col4H)
+        draw(2*pp - h4l, "4H R1", col4H)
+        draw(2*pp - h4h, "4H S1", col4H)
+
+    if showD
+        pp = (dh + dl + dc) / 3
+        draw(pp,        "D PP", colD)
+        draw(2*pp - dl, "D R1", colD)
+        draw(2*pp - dh, "D S1", colD)
+
+    if showW
+        pp = (wh + wl + wc) / 3
+        draw(pp,        "W PP", colW)
+        draw(2*pp - wl, "W R1", colW)
+        draw(2*pp - wh, "W S1", colW)
+
+    if showM
+        pp = (mh + ml + mc) / 3
+        draw(pp,        "M PP", colM)
+        draw(2*pp - ml, "M R1", colM)
+        draw(2*pp - mh, "M S1", colM)
+
+    if showY
+        pp = (yh + yl + yc) / 3
+        draw(pp,        "Y PP", colY)
+        draw(2*pp - yl, "Y R1", colY)
+        draw(2*pp - yh, "Y S1", colY)
