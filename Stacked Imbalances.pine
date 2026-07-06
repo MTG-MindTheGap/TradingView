@@ -1,0 +1,149 @@
+//@version=6
+indicator('Stacked Imbalances', overlay = true, max_boxes_count = 200)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+volAvgLen           = input.int(20, 'Volume Average Length', minval = 5, maxval = 50, group = 'General')
+
+stackMinCount       = input.int(3,       'Min Consecutive Imbalances',
+     minval = 2, maxval = 6,                                                    group = 'Stacked Imbalances')
+stackVolMult        = input.float(1.5,   'Stack Volume Multiplier',
+     minval = 1.0, step = 0.1,                                                  group = 'Stacked Imbalances')
+requireBarDirection = input.bool(true,   'Require Bar Close in Stack Direction',
+     tooltip = 'Adds confirmation: bull stack bars must close green, bear stack bars must close red.',
+                                                                                group = 'Stacked Imbalances')
+stackBullColor      = input.color(color.new(color.lime,   70), 'Fresh Bull Zone Color',  group = 'Stacked Imbalances')
+stackBearColor      = input.color(color.new(color.red,    70), 'Fresh Bear Zone Color',  group = 'Stacked Imbalances')
+stackFlipBullColor  = input.color(color.new(color.aqua,   55), 'Flip → Bull Color',      group = 'Stacked Imbalances')
+stackFlipBearColor  = input.color(color.new(color.orange, 55), 'Flip → Bear Color',      group = 'Stacked Imbalances')
+stackExtendBars     = input.int(1, 'Extend Zone (bars)',
+     minval = 1, maxval = 500,                                                  group = 'Stacked Imbalances')
+stackMaxZones       = input.int(10,  'Max Active Zones',
+     minval = 1, maxval = 30,                                                   group = 'Stacked Imbalances')
+stackInvalidate     = input.bool(true,  'Delete Zone on Close-Through',
+     tooltip = 'Removes a bull zone when price closes below its bottom, and vice versa.',
+                                                                                group = 'Stacked Imbalances')
+alertOnFlip         = input.bool(true,  'Alert: Zone Flip Detected',         group = 'Stacked Imbalances')
+
+// ═══════════════════════════════════════════════════════════════════════
+// UDT
+// ═══════════════════════════════════════════════════════════════════════
+type StackedZone
+    float top
+    float bottom
+    bool  isBull
+    bool  flipped   = false
+    int   startBar
+    box   zoneBox
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+f_overlaps(float top1, float bot1, float top2, float bot2) =>
+    not (top1 < bot2 or top2 < bot1)
+
+// ═══════════════════════════════════════════════════════════════════════
+// CORE — bar delta (buy vs sell volume, split by where close sits in range)
+// ═══════════════════════════════════════════════════════════════════════
+barRange  = high - low
+isBullBar = close >= open
+
+bullFraction = barRange > 0 ? (close - low)  / barRange : 0.5
+sellFraction = barRange > 0 ? (high - close) / barRange : 0.5
+
+buyVol  = volume * bullFraction
+sellVol = volume * sellFraction
+delta   = buyVol - sellVol
+
+avgVol = ta.sma(volume, volAvgLen)
+
+// ═══════════════════════════════════════════════════════════════════════
+// STACKED IMBALANCES — N consecutive bars of high-volume, one-sided delta
+// ═══════════════════════════════════════════════════════════════════════
+var array<StackedZone> stackedZones = array.new<StackedZone>()
+
+bullImbalanceBar = volume > avgVol * stackVolMult
+     and delta   > 0
+     and (not requireBarDirection or isBullBar)
+
+bearImbalanceBar = volume > avgVol * stackVolMult
+     and delta   < 0
+     and (not requireBarDirection or not isBullBar)
+
+bullStack = 0
+bearStack = 0
+for i = 0 to stackMinCount - 1
+    if bullImbalanceBar[i]
+        bullStack += 1
+    if bearImbalanceBar[i]
+        bearStack += 1
+
+isNewBullStack = bullStack >= stackMinCount and not bullImbalanceBar[stackMinCount]
+isNewBearStack = bearStack >= stackMinCount and not bearImbalanceBar[stackMinCount]
+
+stackTop    = ta.highest(high, stackMinCount)
+stackBottom = ta.lowest(low,   stackMinCount)
+
+f_checkFlip(bool newIsBull, float sTop, float sBot) =>
+    foundFlip = false
+    if array.size(stackedZones) > 0
+        for i = array.size(stackedZones) - 1 to 0 by 1
+            z = array.get(stackedZones, i)
+            if z.isBull != newIsBull and f_overlaps(sTop, sBot, z.top, z.bottom)
+                box.delete(z.zoneBox)
+                array.remove(stackedZones, i)
+                foundFlip := true
+    foundFlip
+
+bullFlip = false
+if isNewBullStack
+    bullFlip  := f_checkFlip(true, stackTop, stackBottom)
+    zColor     = bullFlip ? stackFlipBullColor : stackBullColor
+    sBox       = box.new(
+         bar_index - stackMinCount + 1, stackTop,
+         bar_index + stackExtendBars,   stackBottom,
+         border_color = color.new(color.white, 100),
+         border_width = 0,
+         bgcolor      = zColor)
+    array.push(stackedZones, StackedZone.new(stackTop, stackBottom, true, bullFlip, bar_index, sBox))
+    if array.size(stackedZones) > stackMaxZones
+        oldS = array.shift(stackedZones)
+        if not na(oldS.zoneBox)
+            box.delete(oldS.zoneBox)
+
+bearFlip = false
+if isNewBearStack
+    bearFlip  := f_checkFlip(false, stackTop, stackBottom)
+    zColor     = bearFlip ? stackFlipBearColor : stackBearColor
+    sBox       = box.new(
+         bar_index - stackMinCount + 1, stackTop,
+         bar_index + stackExtendBars,   stackBottom,
+         border_color = color.new(color.white, 100),
+         border_width = 0,
+         bgcolor      = zColor)
+    array.push(stackedZones, StackedZone.new(stackTop, stackBottom, false, bearFlip, bar_index, sBox))
+    if array.size(stackedZones) > stackMaxZones
+        oldS = array.shift(stackedZones)
+        if not na(oldS.zoneBox)
+            box.delete(oldS.zoneBox)
+
+if array.size(stackedZones) > 0
+    for i = array.size(stackedZones) - 1 to 0 by 1
+        s = array.get(stackedZones, i)
+        if not na(s)
+            invalid = stackInvalidate and
+                 (s.isBull ? close < s.bottom : close > s.top)
+            if invalid
+                box.delete(s.zoneBox)
+                array.remove(stackedZones, i)
+            else if barstate.islast
+                box.set_right(s.zoneBox, bar_index + stackExtendBars)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════
+alertcondition(isNewBullStack and not bullFlip, 'Fresh Bull Stack', 'Fresh bullish imbalance zone formed')
+alertcondition(isNewBearStack and not bearFlip, 'Fresh Bear Stack', 'Fresh bearish imbalance zone formed')
+alertcondition(alertOnFlip and isNewBullStack and bullFlip, 'Bull Flip Zone', 'Bearish zone flipped bullish — trapped sellers')
+alertcondition(alertOnFlip and isNewBearStack and bearFlip, 'Bear Flip Zone', 'Bullish zone flipped bearish — trapped buyers')
