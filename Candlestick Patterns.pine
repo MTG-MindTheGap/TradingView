@@ -1,0 +1,96 @@
+//@version=6
+indicator('Candlestick Patterns', overlay = true, max_labels_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+requireVolumeConfirmation = input.bool(false, 'Require Volume Confirmation', group = 'Candlestick Patterns')
+volumeAvgLength           = input.int(20,     'Volume Average Length',    minval = 1, group = 'Candlestick Patterns')
+aboveAvgMultiplier        = input.float(1.5,  'Above Average Multiplier', minval = 0.0, step = 0.1, group = 'Candlestick Patterns')
+candleLabelOffset         = input.int(0,      'Label Vertical Offset',
+     minval = -50, maxval = 50, group = 'Candlestick Patterns')
+candleLabelSize  = input.string('tiny',         'Label Size',
+     options = ['auto', 'tiny', 'small', 'normal', 'large', 'huge'], group = 'Candlestick Patterns')
+candleLabelStyle = input.string('label_up/down', 'Label Style',
+     options = ['label_up/down', 'text_only', 'arrow_up/down'],   group = 'Candlestick Patterns')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'small'  => size.small
+        'normal' => size.normal
+        'large'  => size.large
+        'huge'   => size.huge
+        =>          size.auto
+
+f_pat(yPos, txt, bull, ok, lblSz, style) =>
+    if ok
+        clr = bull ? color.green : color.red
+        if style == 'arrow_up/down'
+            label.new(bar_index, yPos, txt,
+                 color = color.new(clr, 80), textcolor = clr,
+                 style = bull ? label.style_triangleup : label.style_triangledown,
+                 size  = lblSz)
+        else if style == 'text_only'
+            label.new(bar_index, yPos, txt,
+                 color = color.new(clr, 100), textcolor = clr,
+                 style = label.style_none, size = lblSz)
+        else
+            label.new(bar_index, yPos, txt,
+                 color = color.new(clr, 80), textcolor = clr,
+                 style = bull ? label.style_label_up : label.style_label_down,
+                 size  = lblSz)
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATTERN DETECTION
+// ═══════════════════════════════════════════════════════════════════════
+atr        = ta.atr(14)
+bodySize   = math.abs(close - open)
+upperWick  = high - math.max(close, open)
+lowerWick  = math.min(close, open) - low
+totalRange = high - low
+avgBody    = nz(ta.sma(bodySize, 14), bodySize)
+
+volSMA   = nz(ta.sma(volume, volumeAvgLength), 0.0)
+volumeOk = not requireVolumeConfirmation or
+     (not na(volume) and volSMA > 0 and
+      volume > volSMA * aboveAvgMultiplier and
+      volume > nz(volume[1]) and volume > nz(volume[2]))
+
+isHammer           = lowerWick > bodySize * 2 and upperWick < bodySize * 0.3 and bodySize > avgBody * 0.3 and close > open
+isInvertedHammer   = upperWick > bodySize * 2 and lowerWick < bodySize * 0.3 and bodySize > avgBody * 0.3
+isBullishEngulfing = close > open and close[1] < open[1] and open <= close[1] and close >= open[1] and bodySize > bodySize[1] * 1.2
+isMorningStar      = close[2] < open[2] and bodySize[2] > avgBody and bodySize[1] < avgBody * 0.5 and close > open and bodySize > avgBody and close > (open[2] + close[2]) / 2
+isMarubozuBull     = bodySize > totalRange * 0.95 and close > open and bodySize > avgBody * 1.3
+isPiercingLine     = close[1] < open[1] and close > open and open < low[1] and close > (open[1] + close[1]) / 2 and close < open[1]
+isShootingStar     = upperWick > bodySize * 2 and lowerWick < bodySize * 0.3 and bodySize > avgBody * 0.3 and close < open
+isHangingMan       = lowerWick > bodySize * 2 and upperWick < bodySize * 0.3 and close < open
+isBearishEngulfing = close < open and close[1] > open[1] and open >= close[1] and close <= open[1] and bodySize > bodySize[1] * 1.2
+isEveningStar      = close[2] > open[2] and bodySize[2] > avgBody and bodySize[1] < avgBody * 0.5 and close < open and bodySize > avgBody and close < (open[2] + close[2]) / 2
+isMarubozuBear     = bodySize > totalRange * 0.95 and close < open and bodySize > avgBody * 1.3
+isDarkCloud        = close[1] > open[1] and close < open and open > high[1] and close < (open[1] + close[1]) / 2 and close > close[1]
+isDoji             = bodySize < totalRange * 0.1 and totalRange > avgBody * 0.5
+
+lblSz = f_getSize(candleLabelSize)
+offV  = atr * candleLabelOffset
+f_pat(low  - offV, 'Hammer',        true,  isHammer and volumeOk,                                  lblSz, candleLabelStyle)
+f_pat(low  - offV, 'Inv Hammer',    true,  isInvertedHammer and not isShootingStar and volumeOk,   lblSz, candleLabelStyle)
+f_pat(low  - offV, 'Bull Engulf',   true,  isBullishEngulfing and volumeOk,                        lblSz, candleLabelStyle)
+f_pat(low  - offV, 'Morning Star',  true,  isMorningStar and volumeOk,                             lblSz, candleLabelStyle)
+f_pat(low  - offV, 'Marubozu Bull', true,  isMarubozuBull and not isBullishEngulfing and volumeOk, lblSz, candleLabelStyle)
+f_pat(low  - offV, 'Piercing Line', true,  isPiercingLine and volumeOk,                            lblSz, candleLabelStyle)
+f_pat(high + offV, 'Shooting Star', false, isShootingStar and volumeOk,                            lblSz, candleLabelStyle)
+f_pat(high + offV, 'Hanging Man',   false, isHangingMan and not isBearishEngulfing and volumeOk,   lblSz, candleLabelStyle)
+f_pat(high + offV, 'Bear Engulf',   false, isBearishEngulfing and volumeOk,                        lblSz, candleLabelStyle)
+f_pat(high + offV, 'Evening Star',  false, isEveningStar and volumeOk,                             lblSz, candleLabelStyle)
+f_pat(high + offV, 'Marubozu Bear', false, isMarubozuBear and volumeOk,                            lblSz, candleLabelStyle)
+f_pat(high + offV, 'Dark Cloud',    false, isDarkCloud and volumeOk,                               lblSz, candleLabelStyle)
+if isDoji and volumeOk
+    label.new(bar_index, high + offV, 'Doji',
+         color    = color.new(color.gray, candleLabelStyle == 'text_only' ? 100 : 80),
+         textcolor = color.white,
+         style    = label.style_label_down,
+         size     = lblSz)
