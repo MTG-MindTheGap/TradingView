@@ -1,0 +1,79 @@
+//@version=6
+indicator('Bollinger Bands', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+bbSource           = input.source(close, 'BB Source',            group = 'Bollinger Bands')
+bbLength           = input.int(21,      'BB Length', minval = 1, group = 'Bollinger Bands')
+bbMult             = input.float(2.0,   'BB Std Dev Multiplier',
+     minval = 0.001, maxval = 50, step = 0.1, group = 'Bollinger Bands')
+bbBasisType        = input.string('SMA', 'BB Basis Type',
+     options = ['SMA', 'EMA'], group = 'Bollinger Bands')
+bbBasisColor       = input.color(color.orange, 'BB Basis Color',      group = 'Bollinger Bands')
+bbUpperBandColor   = input.color(color.gray,   'BB Upper Band Color', group = 'Bollinger Bands')
+bbLowerBandColor   = input.color(color.gray,   'BB Lower Band Color', group = 'Bollinger Bands')
+bbFillTransparency = input.int(90, 'BB Fill Transparency',
+     minval = 0, maxval = 100, group = 'Bollinger Bands')
+bbShowBasis        = input.bool(true,  'Show BB Basis Line',          group = 'Bollinger Bands')
+bbShowDevPct       = input.bool(false, 'Show BB Deviation % Label',   group = 'Bollinger Bands')
+bbDevLabelSize     = input.string('tiny', 'BB Dev Label Size',
+     options = ['auto', 'tiny', 'small', 'normal', 'large', 'huge'], group = 'Bollinger Bands')
+bbDevLabelOffset   = input.float(0.5,  'BB Dev Label Offset (ATR multiples)',
+     minval = 0.0, step = 0.1, group = 'Bollinger Bands')
+bbDevAboveColor    = input.color(color.rgb(255, 80, 80),  'BB Dev Color (Above)', group = 'Bollinger Bands')
+bbDevBelowColor    = input.color(color.rgb(80, 200, 255), 'BB Dev Color (Below)', group = 'Bollinger Bands')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'small'  => size.small
+        'normal' => size.normal
+        'large'  => size.large
+        'huge'   => size.huge
+        =>          size.auto
+
+atr = ta.atr(14)
+
+// ═══════════════════════════════════════════════════════════════════════
+// BANDS
+// ═══════════════════════════════════════════════════════════════════════
+bbBasis = bbBasisType == 'EMA' ? ta.ema(bbSource, bbLength) : ta.sma(bbSource, bbLength)
+bbDev   = bbMult * nz(ta.stdev(bbSource, bbLength), 0.0)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+pBasis = plot(bbShowBasis ? bbBasis : na, title = 'BB Basis',    color = bbBasisColor)
+pUpper = plot(bbUpper,                    title = 'BB Upper 2σ', color = bbUpperBandColor)
+pLower = plot(bbLower,                    title = 'BB Lower 2σ', color = bbLowerBandColor)
+fill(pBasis, pUpper, color = color.new(bbUpperBandColor, bbFillTransparency))
+fill(pBasis, pLower, color = color.new(bbLowerBandColor, bbFillTransparency))
+
+isAboveUpper = close > bbUpper
+isBelowLower = close < bbLower
+
+bbDevPct = isAboveUpper and bbUpper > 0 ? (close - bbUpper) / bbUpper * 100 :
+           isBelowLower and bbLower > 0 ? (bbLower - close) / bbLower * 100 :
+           float(na)
+
+if bbShowDevPct and not na(bbDevPct)
+    devLblSz  = f_getSize(bbDevLabelSize)
+    devOffset = atr * bbDevLabelOffset
+    devTxt    = str.tostring(bbDevPct, '#.##') + '%'
+    if isAboveUpper
+        label.new(bar_index, high, devTxt,
+             color     = color.new(bbDevAboveColor, 20),
+             textcolor = color.white,
+             style     = label.style_label_left,
+             size      = devLblSz)
+    else
+        label.new(bar_index, low, devTxt,
+             color     = color.new(bbDevBelowColor, 20),
+             textcolor = color.white,
+             style     = label.style_label_left,
+             size      = devLblSz)
+
+plot(bbShowDevPct ? bbDevPct : na, title = 'BB Dev %', display = display.none)
