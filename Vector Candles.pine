@@ -1,0 +1,77 @@
+//@version=6
+indicator('Vector Candles', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+overridesym        = input.bool(false, 'Override chart symbol?', group = 'Vector Candles', inline = 'pvsra')
+pvsra_sym          = input.symbol('INDEX:BTCUSD', '', group = 'Vector Candles', inline = 'pvsra')
+colorWicks         = input.bool(true,  'Color Candle Wicks',       group = 'Vector Candles')
+climaxMultiplier   = input.float(2.0,  'Climax Volume Multiplier', minval = 0.0, step = 0.1, group = 'Vector Candles')
+aboveAvgMultiplier = input.float(1.5,  'Above Average Multiplier', minval = 0.0, step = 0.1, group = 'Vector Candles')
+volumeAvgLength    = input.int(20,     'Volume Average Length',    minval = 1,               group = 'Vector Candles')
+CUColor = input.color(color.lime,            'Climax Up',      group = 'Vector Candles Colors')
+CDColor = input.color(color.red,             'Climax Down',    group = 'Vector Candles Colors')
+AUColor = input.color(color.rgb(33, 170, 255), 'Above Avg Up',   group = 'Vector Candles Colors')
+ADColor = input.color(color.fuchsia,         'Above Avg Down', group = 'Vector Candles Colors')
+NUColor = input.color(#9b9b9b,               'Normal Up',      group = 'Vector Candles Colors')
+NDColor = input.color(#414141,               'Normal Down',    group = 'Vector Candles Colors')
+
+// ═══════════════════════════════════════════════════════════════════════
+// PVSRA-STYLE VOLUME CLIMAX DETECTION
+// Optionally pulls OHLCV from another symbol (e.g. a correlated futures/
+// index feed) instead of the chart's own data.
+// ═══════════════════════════════════════════════════════════════════════
+pvsra_vol_raw = overridesym ?
+     request.security(pvsra_sym, '', volume[barstate.isrealtime ? 1 : 0],
+          barmerge.gaps_off, barmerge.lookahead_off) : volume
+pvsra_hi_raw  = overridesym ?
+     request.security(pvsra_sym, '', high[barstate.isrealtime ? 1 : 0],
+          barmerge.gaps_off, barmerge.lookahead_off) : high
+pvsra_lo_raw  = overridesym ?
+     request.security(pvsra_sym, '', low[barstate.isrealtime ? 1 : 0],
+          barmerge.gaps_off, barmerge.lookahead_off) : low
+pvsra_cl_raw  = overridesym ?
+     request.security(pvsra_sym, '', close[barstate.isrealtime ? 1 : 0],
+          barmerge.gaps_off, barmerge.lookahead_off) : close
+pvsra_op_raw  = overridesym ?
+     request.security(pvsra_sym, '', open[barstate.isrealtime ? 1 : 0],
+          barmerge.gaps_off, barmerge.lookahead_off) : open
+
+pvsra_vol = nz(pvsra_vol_raw, 0.0)
+pvsra_hi  = nz(pvsra_hi_raw,  high)
+pvsra_lo  = nz(pvsra_lo_raw,  low)
+pvsra_cl  = nz(pvsra_cl_raw,  close)
+pvsra_op  = nz(pvsra_op_raw,  open)
+
+_vcVolSum = math.sum(pvsra_vol, volumeAvgLength)
+av        = volumeAvgLength > 0 and _vcVolSum > 0 ?
+     _vcVolSum / volumeAvgLength : 0.0
+
+value2   = pvsra_vol * (pvsra_hi - pvsra_lo)
+hivalue2 = ta.highest(value2, 10)
+
+isClimax   = av > 0 and (pvsra_vol >= av * climaxMultiplier or value2 >= hivalue2)
+isAboveAvg = av > 0 and pvsra_vol >= av * aboveAvgMultiplier
+va         = isClimax ? 1 : isAboveAvg ? 2 : 0
+isBull_vc  = pvsra_cl > pvsra_op
+
+candleColor = isBull_vc ?
+     (va == 1 ? CUColor : va == 2 ? AUColor : NUColor) :
+     (va == 1 ? CDColor : va == 2 ? ADColor : NDColor)
+
+// ═══════════════════════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════════════════════
+barcolor(candleColor)
+
+plotcandle(
+     colorWicks ? open  : na,
+     colorWicks ? high  : na,
+     colorWicks ? low   : na,
+     colorWicks ? close : na,
+     title       = 'Vector Candle Wicks',
+     color       = candleColor,
+     wickcolor   = candleColor,
+     bordercolor = candleColor,
+     editable    = false)
