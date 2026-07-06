@@ -1,0 +1,71 @@
+//@version=6
+indicator('Custom Anchored VWAP', overlay = true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// VWAP 1 INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showVWAP1   = input.bool(true,      'Show VWAP 1',    group = 'VWAP 1')
+vwap1Year   = input.int(2025, 'Anchor Year',  minval = 2000, maxval = 2100, group = 'VWAP 1')
+vwap1Month  = input.int(1,    'Anchor Month', minval = 1,    maxval = 12,   group = 'VWAP 1')
+vwap1Day    = input.int(1,    'Anchor Day',   minval = 1,    maxval = 31,   group = 'VWAP 1')
+vwap1Color  = input.color(color.white, 'VWAP Color',        group = 'VWAP 1')
+vwap1Width  = input.int(1, 'VWAP Line Width', minval = 1, maxval = 4, group = 'VWAP 1')
+
+// ═══════════════════════════════════════════════════════════════════════
+// VWAP 2 INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showVWAP2   = input.bool(true,      'Show VWAP 2',    group = 'VWAP 2')
+vwap2Year   = input.int(2026, 'Anchor Year',  minval = 2000, maxval = 2100, group = 'VWAP 2')
+vwap2Month  = input.int(1,    'Anchor Month', minval = 1,    maxval = 12,   group = 'VWAP 2')
+vwap2Day    = input.int(1,    'Anchor Day',   minval = 1,    maxval = 31,   group = 'VWAP 2')
+vwap2Color  = input.color(color.green, 'VWAP Color',        group = 'VWAP 2')
+vwap2Width  = input.int(1, 'VWAP Line Width', minval = 1, maxval = 4, group = 'VWAP 2')
+
+// ═══════════════════════════════════════════════════════════════════════
+// ANCHORED VWAP — runs entirely at daily resolution so the anchor date
+// lines up regardless of the chart's own timeframe.
+// ═══════════════════════════════════════════════════════════════════════
+f_anchoredVwapDaily(int anchorYear, int anchorMonth, int anchorDay) =>
+    int   anchorTs = timestamp(anchorYear, anchorMonth, anchorDay, 0, 0, 0)
+    var float sumPV  = 0.0
+    var float sumV   = 0.0
+    var bool  active = false
+
+    if time >= anchorTs and time[1] < anchorTs
+        sumPV  := 0.0
+        sumV   := 0.0
+        active := true
+
+    if active
+        float v = math.max(1.0, nz(volume, 1.0))
+        sumPV  += hlc3 * v
+        sumV   += v
+
+    active and sumV > 0 ? sumPV / sumV : na
+
+vwap1 = showVWAP1
+     ? request.security(syminfo.tickerid, 'D', f_anchoredVwapDaily(vwap1Year, vwap1Month, vwap1Day), lookahead = barmerge.lookahead_off)
+     : na
+
+vwap2 = showVWAP2
+     ? request.security(syminfo.tickerid, 'D', f_anchoredVwapDaily(vwap2Year, vwap2Month, vwap2Day), lookahead = barmerge.lookahead_off)
+     : na
+
+// ═══════════════════════════════════════════════════════════════════════
+// PLOTS
+// ═══════════════════════════════════════════════════════════════════════
+plot(vwap1, title = 'Anchored VWAP 1', color = vwap1Color, linewidth = vwap1Width)
+if showVWAP1 and not na(vwap1) and barstate.islast
+    label.new(bar_index, vwap1, str.tostring(vwap1Day) + '/' + str.tostring(vwap1Month) + '/' + str.tostring(vwap1Year) + ' VWAP',
+         color     = color.new(vwap1Color, 70),
+         textcolor = color.white,
+         style     = label.style_label_left,
+         size      = size.tiny)
+
+plot(vwap2, title = 'Anchored VWAP 2', color = vwap2Color, linewidth = vwap2Width)
+if showVWAP2 and not na(vwap2) and barstate.islast
+    label.new(bar_index, vwap2, str.tostring(vwap2Day) + '/' + str.tostring(vwap2Month) + '/' + str.tostring(vwap2Year) + ' VWAP',
+         color     = color.new(vwap2Color, 70),
+         textcolor = color.white,
+         style     = label.style_label_left,
+         size      = size.tiny)
