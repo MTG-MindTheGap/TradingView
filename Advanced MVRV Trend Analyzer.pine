@@ -1,0 +1,44 @@
+//@version=5
+indicator("Advanced MVRV Trend Analyzer", overlay=false)
+
+// Input parameters for cohort durations
+shortTermLength = input.int(14, title="Short-term Cohort (days)")
+midTermLength = input.int(50, title="Mid-term Cohort (days)")
+longTermLength = input.int(200, title="Long-term Cohort (days)")
+
+// Calculate Market Value (MV)
+marketValue = close
+
+// Calculate Realized Value (RV) for each cohort by taking the moving average (an approximation of the cost basis)
+shortTermRV = ta.sma(close, shortTermLength)
+midTermRV = ta.sma(close, midTermLength)
+longTermRV = ta.sma(close, longTermLength)
+
+// Calculate MVRV for each cohort
+shortTermMVRV = marketValue / shortTermRV
+midTermMVRV = marketValue / midTermRV
+longTermMVRV = marketValue / longTermRV
+
+// Adding moving averages of MVRVs to track their trends
+shortTermMVRV_MA = ta.sma(shortTermMVRV, shortTermLength)
+midTermMVRV_MA = ta.sma(midTermMVRV, midTermLength)
+longTermMVRV_MA = ta.sma(longTermMVRV, longTermLength)
+
+// Plotting MVRV for each cohort
+plot(shortTermMVRV, color=color.blue, title="Short-term MVRV")
+plot(midTermMVRV, color=color.green, title="Mid-term MVRV")
+plot(longTermMVRV, color=color.red, title="Long-term MVRV")
+
+// Plotting moving averages of MVRVs
+plot(shortTermMVRV_MA, color=color.new(color.blue, 50), title="MA of Short-term MVRV", style=plot.style_linebr)
+plot(midTermMVRV_MA, color=color.new(color.green, 50), title="MA of Mid-term MVRV", style=plot.style_linebr)
+plot(longTermMVRV_MA, color=color.new(color.red, 50), title="MA of Long-term MVRV", style=plot.style_linebr)
+
+// Optional: Add threshold lines for interpretation (e.g., overvaluation/undervaluation zones)
+hline(1, "Baseline (MV = RV)", color=color.gray, linestyle=hline.style_dotted)
+hline(1.5, "Overvalued Threshold", color=color.red, linestyle=hline.style_dotted)
+hline(0.5, "Undervalued Threshold", color=color.green, linestyle=hline.style_dotted)
+
+// Tooltip information and dynamic background coloring
+bgcolor(shortTermMVRV > 1.5 or midTermMVRV > 1.5 or longTermMVRV > 1.5 ? color.new(color.red, 90) : na, title="Overvalued Zone")
+bgcolor(shortTermMVRV < 0.5 or midTermMVRV < 0.5 or longTermMVRV < 0.5 ? color.new(color.green, 90) : na, title="Undervalued Zone")
