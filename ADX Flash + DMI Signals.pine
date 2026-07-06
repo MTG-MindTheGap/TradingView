@@ -1,0 +1,291 @@
+//@version=6
+indicator('ADX Flash + DMI Signals', overlay = true, max_lines_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADX FLASH INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+adxEnabled        = input.bool(true,   'Enable ADX Flash',   group = 'ADX Settings')
+adxLength         = input.int(14,      'ADX Length',          minval = 1, group = 'ADX Settings')
+adxThreshold      = input.float(13,    'ADX Threshold',
+     minval = 1, maxval = 100, group = 'ADX Settings')
+flashColor        = input.color(color.new(color.gray, 80), 'Flash Color', group = 'ADX Settings')
+maxYearsBack      = input.int(3,       'Max Years Lookback', minval = 1, maxval = 10, group = 'ADX Settings')
+adxHighBarColor   = input.color(color.new(color.blue, 0), 'ADX >Threshold Bar Color', group = 'ADX Settings')
+adxHighBarEnabled = input.bool(false, 'Color Bars When ADX > High Threshold', group = 'ADX Settings')
+
+candlesAfterFlash = input.int(2,       'Candles After Flash to Start Cross Detection',
+     minval = 0, group = 'ADX Settings')
+adxWarmupBars = input.int(14, 'Ignore First N Bars (Warm-up)', minval = 14, maxval = 500, group = 'ADX Settings')
+
+showADXTable      = input.bool(true,   'Show ADX Table',      group = 'ADX Table')
+maxTableRows      = input.int(10,      'Max Table Rows',
+     minval = 1, maxval = 10, group = 'ADX Table')
+adxTablePos       = input.string('bottom_right', 'Table Position',
+     options = ['top_left', 'top_center', 'top_right', 'middle_left', 'middle_center',
+                'middle_right', 'bottom_left', 'bottom_center', 'bottom_right'], group = 'ADX Table')
+adxTableSize      = input.string('tiny', 'Table Text Size',
+     options = ['tiny', 'small', 'normal', 'large', 'huge'], group = 'ADX Table')
+tableHeaderBg     = input.color(color.blue,  'Header Background',  group = 'ADX Table')
+tableHeaderText   = input.color(color.white, 'Header Text',         group = 'ADX Table')
+tableRowBg1       = input.color(color.new(color.gray, 90), 'Row Bg 1', group = 'ADX Table')
+tableRowBg2       = input.color(color.new(color.gray, 95), 'Row Bg 2', group = 'ADX Table')
+tableTextColor    = input.color(color.white, 'Row Text Color',       group = 'ADX Table')
+tableGreenBg      = input.color(color.new(color.green, 70), 'Positive Distance Bg', group = 'ADX Table')
+tableRedBg        = input.color(color.new(color.red, 70),   'Negative Distance Bg', group = 'ADX Table')
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADX / DMI SIGNAL INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+showDMISignals     = input.bool(true,  'Enable ADX/DMI Signals', group = 'ADX/DMI Signals')
+adxHighThreshold   = input.float(50,   'ADX High Threshold',
+     minval = 30, maxval = 90, group = 'ADX/DMI Signals')
+breakoutColor      = input.color(color.new(color.green, 0),  'Breakout Color',  group = 'ADX/DMI Signals')
+breakoutShape      = input.string('arrow_up',   'Breakout Shape',
+     options = ['arrow_up', 'triangle_up', 'circle', 'square', 'diamond', 'cross', 'flag'],
+     group = 'ADX/DMI Signals')
+breakoutSize       = input.string('small', 'Breakout Size',
+     options = ['tiny', 'small', 'normal', 'large', 'huge'], group = 'ADX/DMI Signals')
+breakdownColor     = input.color(color.new(color.red, 0),    'Breakdown Color', group = 'ADX/DMI Signals')
+breakdownShape     = input.string('arrow_down', 'Breakdown Shape',
+     options = ['arrow_down', 'triangle_down', 'circle', 'square', 'diamond', 'xcross', 'flag'],
+     group = 'ADX/DMI Signals')
+breakdownSize      = input.string('small', 'Breakdown Size',
+     options = ['tiny', 'small', 'normal', 'large', 'huge'], group = 'ADX/DMI Signals')
+exhaustionColor    = input.color(color.new(color.orange, 0), 'Exhaustion Color', group = 'ADX/DMI Signals')
+exhaustionUpShape  = input.string('arrow_up',   'Exhaustion Up Shape',
+     options = ['arrow_up', 'triangle_up', 'circle', 'square', 'diamond', 'cross', 'flag'],
+     group = 'ADX/DMI Signals')
+exhaustionDnShape  = input.string('arrow_down', 'Exhaustion Down Shape',
+     options = ['arrow_down', 'triangle_down', 'circle', 'square', 'diamond', 'xcross', 'flag'],
+     group = 'ADX/DMI Signals')
+exhaustionSize     = input.string('small', 'Exhaustion Size',
+     options = ['tiny', 'small', 'normal', 'large', 'huge'], group = 'ADX/DMI Signals')
+exhaustionSlopeLen = input.int(14, 'Exhaustion Slope Lookback', minval = 1, maxval = 50, group = 'ADX/DMI Signals')
+breakoutSlopeLen   = input.int(14, 'Breakout Slope Lookback',   minval = 1, maxval = 50, group = 'ADX/DMI Signals')
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHARED CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════
+var int MAX_LOOKBACK_MS = maxYearsBack * 365 * 24 * 60 * 60 * 1000
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+getTFLabel() =>
+    p = timeframe.period
+    p == '1'   ? '1min'  : p == '2'   ? '2min'  : p == '3'   ? '3min'  :
+     p == '5'   ? '5min'  : p == '10'  ? '10min' : p == '15'  ? '15min' :
+     p == '20'  ? '20min' : p == '30'  ? '30min' : p == '45'  ? '45min' :
+     p == '60'  ? '1H'    : p == '120' ? '2H'    : p == '180' ? '3H'    :
+     p == '240' ? '4H'    : p == '360' ? '6H'    : p == '480' ? '8H'    :
+     p == '720' ? '12H'   : p == 'D'   ? '1D'    : p == '2D'  ? '2D'    :
+     p == '3D'  ? '3D'    : p == 'W'   ? '1W'    : p == '2W'  ? '2W'    :
+     p == 'M'   ? '1M'    : p == '3M'  ? '3M'    : p == '6M'  ? '6M'    :
+     p == '12M' ? '1Y'    : p
+
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'small'  => size.small
+        'normal' => size.normal
+        'large'  => size.large
+        'huge'   => size.huge
+        =>          size.tiny
+
+f_labelStyle(s) =>
+    switch s
+        'arrow_up'      => label.style_arrowup
+        'triangle_up'   => label.style_triangleup
+        'circle'        => label.style_circle
+        'square'        => label.style_square
+        'diamond'       => label.style_diamond
+        'cross'         => label.style_cross
+        'flag'          => label.style_flag
+        'arrow_down'    => label.style_arrowdown
+        'triangle_down' => label.style_triangledown
+        'xcross'        => label.style_xcross
+        =>                 label.style_arrowup
+
+f_resolvePos(posStr) =>
+    switch posStr
+        'top_left'      => position.top_left
+        'top_center'    => position.top_center
+        'top_right'     => position.top_right
+        'middle_left'   => position.middle_left
+        'middle_center' => position.middle_center
+        'middle_right'  => position.middle_right
+        'bottom_left'   => position.bottom_left
+        'bottom_center' => position.bottom_center
+        =>                 position.bottom_right
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADX FLASH + DMI SIGNALS
+// ═══════════════════════════════════════════════════════════════════════
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+
+adx_safe      = nz(adx, 0.0)
+adxAbove50Now = adxHighBarEnabled and adx_safe > adxHighThreshold
+barcolor(adxAbove50Now ? adxHighBarColor : na)
+
+diP_safe = nz(diPlus,  0.0)
+diM_safe = nz(diMinus, 0.0)
+
+var bool  isInFlashPeriod = false
+var int   flashStartBar   = na
+var float lowestAdx       = na
+var float lastFlashOpen   = na
+var int   lastFlashBar    = na
+var int   lastFlashTime   = na
+
+adxBelowThreshold = adx_safe < adxThreshold
+adxAboveThreshold = adx_safe >= adxThreshold
+
+if adxBelowThreshold and not adxBelowThreshold[1] and bar_index >= adxWarmupBars
+    isInFlashPeriod := true
+    flashStartBar   := bar_index
+    lowestAdx       := adx_safe
+    lastFlashOpen   := open
+    lastFlashBar    := bar_index
+    lastFlashTime   := time
+
+if isInFlashPeriod and adxBelowThreshold
+    if adx_safe < nz(lowestAdx, adx_safe)
+        lowestAdx := adx_safe
+    lastFlashOpen := open
+    lastFlashBar  := bar_index
+    lastFlashTime := time
+
+if adxAboveThreshold and adxBelowThreshold[1] and isInFlashPeriod
+    isInFlashPeriod := false
+
+isFlashing   = isInFlashPeriod
+flashStopped = adxAboveThreshold and adxBelowThreshold[1] and not na(flashStartBar)
+bgcolor(adxEnabled and isFlashing and bar_index >= adxWarmupBars ? flashColor : na, title = 'Flash Signal')
+
+diPlusDominant        = diP_safe >= diM_safe
+diMinusDominant       = diM_safe >  diP_safe
+subordinateDMI        = diPlusDominant ? diM_safe : diP_safe
+adxCrossAboveLowerDMI = ta.crossover(adx_safe, subordinateDMI)
+adxRising             = adx_safe > nz(adx_safe[breakoutSlopeLen], adx_safe)
+isBreakout  = showDMISignals and adxEnabled and adxCrossAboveLowerDMI and diPlusDominant  and adxRising
+isBreakdown = showDMISignals and adxEnabled and adxCrossAboveLowerDMI and diMinusDominant and adxRising
+
+adxAboveBothDMI = adx_safe > diP_safe and adx_safe > diM_safe
+
+// Equivalent to a strict monotonic decline check over the lookback window:
+// current ADX must be below the highest value across the prior window.
+_adxPriorHigh = ta.highest(adx_safe, exhaustionSlopeLen)[1]
+adxDecliningEveryBar = bar_index >= exhaustionSlopeLen and adx_safe < nz(_adxPriorHigh, adx_safe)
+
+exhaustionFilterMet  = adxAboveBothDMI and adxDecliningEveryBar
+adxCrossAboveDiPlus  = ta.crossover(adx_safe, diP_safe)
+adxCrossAboveDiMinus = ta.crossover(adx_safe, diM_safe)
+isBullExhaustion = showDMISignals and adxEnabled and adxCrossAboveDiPlus  and diPlusDominant[1]  and exhaustionFilterMet
+isBearExhaustion = showDMISignals and adxEnabled and adxCrossAboveDiMinus and diMinusDominant[1] and exhaustionFilterMet
+
+if isBreakout
+    label.new(bar_index, low,  text = '',
+         style = f_labelStyle(breakoutShape),  color = breakoutColor,
+         textcolor = breakoutColor,  size = f_getSize(breakoutSize),  yloc = yloc.belowbar)
+if isBreakdown
+    label.new(bar_index, high, text = '',
+         style = f_labelStyle(breakdownShape), color = breakdownColor,
+         textcolor = breakdownColor, size = f_getSize(breakdownSize), yloc = yloc.abovebar)
+if isBullExhaustion
+    label.new(bar_index, high, text = '',
+         style = f_labelStyle(exhaustionDnShape), color = exhaustionColor,
+         textcolor = exhaustionColor, size = f_getSize(exhaustionSize), yloc = yloc.abovebar)
+if isBearExhaustion
+    label.new(bar_index, low,  text = '',
+         style = f_labelStyle(exhaustionUpShape), color = exhaustionColor,
+         textcolor = exhaustionColor, size = f_getSize(exhaustionSize), yloc = yloc.belowbar)
+
+var array<float> targetPrices   = array.new<float>()
+var array<int>   targetBars     = array.new<int>()
+var array<int>   flashStartBars = array.new<int>()
+var array<bool>  targetCrossed  = array.new<bool>()
+var array<int>   targetTimes    = array.new<int>()
+var array<int>   firstCrossBar  = array.new<int>()
+
+if flashStopped and not na(lastFlashOpen) and not na(lastFlashBar) and not na(lastFlashTime) and bar_index >= adxWarmupBars
+    array.push(targetPrices,   lastFlashOpen)
+    array.push(targetBars,     lastFlashBar)
+    array.push(flashStartBars, flashStartBar)
+    array.push(targetCrossed,  false)
+    array.push(targetTimes,    lastFlashTime)
+    array.push(firstCrossBar,  na)
+    flashStartBar := na
+    lowestAdx     := na
+    lastFlashOpen := na
+    lastFlashBar  := na
+    lastFlashTime := na
+
+if array.size(targetPrices) > 0
+    for i = array.size(targetPrices) - 1 to 0 by 1
+        if array.get(targetCrossed, i)
+            continue
+        tTime = array.get(targetTimes, i)
+        if na(tTime) or time - tTime > MAX_LOOKBACK_MS
+            continue
+        tLevel = array.get(targetPrices, i)
+        tBar   = array.get(targetBars,   i)
+        if not na(tLevel) and not na(tBar) and bar_index > tBar + candlesAfterFlash
+            if low <= tLevel and high >= tLevel
+                array.set(firstCrossBar, i, bar_index)
+                array.set(targetCrossed, i, true)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADX TABLE
+// ═══════════════════════════════════════════════════════════════════════
+var table adxTable = na
+
+if adxEnabled and showADXTable and barstate.islast
+    table.delete(adxTable)
+    tPrices = array.new<float>()
+    tDays   = array.new<int>()
+    if array.size(targetPrices) > 0
+        for i = array.size(targetPrices) - 1 to 0 by 1
+            if array.size(tPrices) >= maxTableRows
+                break
+            if array.get(targetCrossed, i)
+                continue
+            tTime = array.get(targetTimes, i)
+            if na(tTime)
+                continue
+            tDiff = time - tTime
+            if tDiff >= 0 and tDiff <= MAX_LOOKBACK_MS
+                array.push(tPrices, array.get(targetPrices, i))
+                array.push(tDays,   int(tDiff / 86400000))
+    nT = array.size(tPrices)
+    if nT > 0
+        tSz  = f_getSize(adxTableSize)
+        tPos = f_resolvePos(adxTablePos)
+        adxTable := table.new(tPos, 4, nT + 1)
+        table.cell(adxTable, 0, 0, 'TF',    bgcolor = tableHeaderBg, text_color = tableHeaderText, text_size = tSz)
+        table.cell(adxTable, 1, 0, 'Price', bgcolor = tableHeaderBg, text_color = tableHeaderText, text_size = tSz)
+        table.cell(adxTable, 2, 0, 'Dist',  bgcolor = tableHeaderBg, text_color = tableHeaderText, text_size = tSz)
+        table.cell(adxTable, 3, 0, 'Age',   bgcolor = tableHeaderBg, text_color = tableHeaderText, text_size = tSz)
+        tfLbl = getTFLabel()
+        for i = 0 to nT - 1
+            p    = array.get(tPrices, i)
+            d    = array.get(tDays,   i)
+            dist = not na(p) and close > 0 ? (p - close) / close * 100 : 0.0
+            bg   = i % 2 == 0 ? tableRowBg1 : tableRowBg2
+            table.cell(adxTable, 0, i + 1, tfLbl,
+                 bgcolor = bg, text_color = tableTextColor, text_size = tSz)
+            table.cell(adxTable, 1, i + 1,
+                 not na(p) ? str.tostring(p, format.mintick) : 'N/A',
+                 bgcolor = bg, text_color = tableTextColor, text_size = tSz)
+            table.cell(adxTable, 2, i + 1, str.tostring(dist, '#.#') + '%',
+                 bgcolor = dist > 0 ? tableGreenBg : tableRedBg,
+                 text_color = tableTextColor, text_size = tSz)
+            table.cell(adxTable, 3, i + 1, str.tostring(d) + 'd',
+                 bgcolor = bg, text_color = tableTextColor, text_size = tSz)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════
+alertcondition(isBreakout,       'ADX Breakout',    'ADX confirmed breakout')
+alertcondition(isBreakdown,      'ADX Breakdown',   'ADX confirmed breakdown')
+alertcondition(isBullExhaustion, 'Bull Exhaustion', 'Bullish trend exhausting')
+alertcondition(isBearExhaustion, 'Bear Exhaustion', 'Bearish trend exhausting')
