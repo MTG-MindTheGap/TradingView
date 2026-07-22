@@ -1,0 +1,88 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © kocurekc (original "HVVP" script), modified by MindTheGap
+//
+//@version=6
+//
+// @author Kocurekc (original), MindTheGap (modifications)
+// @Cheatcountry, thanks the great code idea
+// @Picte, thanks for your inspired idea
+// @Balipour, thanks for your inspired comment
+//
+// Modifications from the original:
+// - Manual O(avg) percentile-rank loop -> ta.percentrank() (same result, far cheaper)
+// - Hand-rolled variance sum (mixed each bar's own rolling mean into one window) -> ta.stdev(r, len, false)
+// - Dropped the sqrt(avg) "annualization": it never changed hvp/hvvp since percentile rank
+//   is scale-invariant, so it was dead complexity
+// - vPR now gates hvp/hvvp directly. Previously it gated percentrank(hvp)/percentrank(hvvp)
+//   (a rank of a rank), so "extreme zone %" didn't mean what the input said
+// - Added crossover/crossunder regime-shift signals (compression -> expansion, climax -> unwind);
+//   a static "currently extreme" reading isn't actionable, the transition is
+// - Added an EMA trend filter so signals carry directional context
+// - Price/volume blend weight is now an input instead of hardcoded 50/50
+// - Guarded log10(volume) against zero-volume bars
+// - Added alertcondition() calls
+// - Removed dead commented-out code and a duplicate block that recomputed the same series twice
+
+indicator(title='Historical Volatility Percentile: Price and Volume', shorttitle='HVVP', precision=2)
+
+// ─── Inputs ─────────────────────────────────────────────────────────────
+src      = input.source(close, title='Source')
+len      = input.int(22, title='HV Length', minval=2)
+avg      = input.int(88, title='Percentile Lookback', minval=10)
+smalen   = input.int(22, title='Signal Line Length', minval=1)
+vPR      = input.float(5, title='Extreme Zone (%)', minval=1, maxval=49, tooltip='hvp/hvvp readings within this % of 0 or 100 count as extreme')
+priceWt  = input.float(0.5, title='Price Weight', minval=0, maxval=1, step=0.05, tooltip='Blend weight for price HV vs volume HV. 0.5 = equal weight')
+bc       = input.bool(true, title='Include Price')
+vc       = input.bool(true, title='Include Volume')
+pc       = input.bool(true, title='Include Signal Markers')
+sc       = input.bool(true, title='Include Signal Line')
+trendLen = input.int(50, title='Trend Filter EMA Length')
+
+// ─── Historical volatility: sample stdev of log returns ───────────────────
+fHV(_src, _len) =>
+    r = math.log(_src / nz(_src[1], _src))
+    ta.stdev(r, _len, false)
+
+// ─── Core series ────────────────────────────────────────────────────────
+hv  = fHV(src, len)
+hvv = fHV(math.log10(math.max(volume, 1)), len)
+
+hvp  = bc ? ta.percentrank(hv, avg) : 0.0
+hvvp = vc ? ta.percentrank(hvv, avg) : 0.0
+
+bothActive = bc and vc
+VV = bothActive ? hvp * priceWt + hvvp * (1 - priceWt) : bc ? hvp : hvvp
+
+// ─── Trend context (directional filter, not a signal on its own) ──────────
+trendUp = src > ta.ema(src, trendLen)
+
+// ─── Histogram ──────────────────────────────────────────────────────────
+hc = VV > 90 ? color.maroon : VV > 79 ? color.orange : VV >= 71 ? color.yellow : VV >= 50 ? color.green : VV <= 30 ? color.gray : color.blue
+plot(VV, style=plot.style_columns, color=hc, title='Volatility Percentile')
+
+lowThresh  = vPR
+highThresh = 100 - vPR
+
+// ─── Regime-shift signals ───────────────────────────────────────────────
+extremeHigh = bothActive ? (hvp >= highThresh and hvvp >= highThresh) : VV >= highThresh
+extremeLow  = bothActive ? (hvp <= lowThresh and hvvp <= lowThresh) : VV <= lowThresh
+
+volExpanding   = ta.crossover(VV, lowThresh)    // was compressed, now breaking out of it
+volContracting = ta.crossunder(VV, highThresh)  // was climaxed, now unwinding
+
+plotshape(pc and extremeHigh ? VV : na, location=location.absolute, style=shape.triangledown, color=color.new(color.red, 0), size=size.small, title='Vol Climax (price+vol agree)')
+plotshape(pc and extremeLow ? 0 : na, location=location.absolute, style=shape.triangleup, color=color.new(color.red, 0), size=size.small, title='Vol Trough (price+vol agree)')
+plotshape(pc and volExpanding ? lowThresh : na, location=location.absolute, style=shape.circle, color=trendUp ? color.new(color.lime, 0) : color.new(color.fuchsia, 0), size=size.tiny, title='Expansion Starting')
+plotshape(pc and volContracting ? highThresh : na, location=location.absolute, style=shape.circle, color=color.new(color.gray, 30), size=size.tiny, title='Contraction Starting')
+
+// ─── Signal line ────────────────────────────────────────────────────────
+plot(sc ? ta.sma(VV, smalen) : na, color=color.new(color.blue, 0), linewidth=2, title='Signal Line')
+
+hline(highThresh, title='High Threshold', color=color.new(color.red, 70))
+hline(lowThresh, title='Low Threshold', color=color.new(color.green, 70))
+
+// ─── Alerts ─────────────────────────────────────────────────────────────
+alertcondition(extremeHigh, title='Volatility Climax', message='HVVP: price + volume volatility both extreme high')
+alertcondition(extremeLow, title='Volatility Trough', message='HVVP: price + volume volatility both extreme low')
+alertcondition(volExpanding, title='Volatility Expansion Starting', message='HVVP: volatility breaking out of compression')
+alertcondition(volContracting, title='Volatility Contraction Starting', message='HVVP: volatility unwinding from climax')
