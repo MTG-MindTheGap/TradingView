@@ -1,0 +1,220 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Based on "MCDX Plus" by Kent_RichProFit_93. Simplified/rewritten by Claude (11Jul26):
+// one calculation engine instead of three, ~44 inputs collapsed to 11, and the plotted
+// bug that pinned "Retail" to a flat 100 in all three original modes is gone because
+// there's only one code path now. See notes inline for anything non-obvious.
+//
+// What this measures: three boundary lines derived purely from price position within a
+// rolling N-bar high/low range (a stochastic-%-of-range read), NOT actual holder/volume
+// data. "Smart Money" / "Daytrader" / "Retail" are a readable relabeling of that boundary
+// concept, not literal shareholder categories.
+
+//@version=6
+indicator(title = 'Smart Money Flow (Simplified)', shorttitle = 'SM Flow', format = format.price, precision = 2, overlay = false)
+
+///////////////////////////////
+// Inputs
+///////////////////////////////
+grData = 'Source & Length'
+source     = input.source(close, 'Source', group = grData)
+lengthMode = input.string('Auto', 'Length', options = ['Auto', 'Manual'], group = grData, tooltip = 'Auto ramps 3->100 bars so new/IPO stocks aren\'t starved of history. Manual uses a fixed length.')
+manualLen  = input.int(100, 'Manual Length', minval = 3, group = grData)
+displayMode = input.string('All', 'Display', options = ['All', 'Smart Money', 'Daytrader', 'Retail'], group = grData)
+
+grMA = 'Moving Averages'
+showSMA = input.bool(true, 'Show SMA', group = grMA)
+smaLen  = input.int(10, 'SMA Length', minval = 1, group = grMA)
+
+grSig = 'Signals'
+showCross  = input.bool(true, 'Golden / Death Cross', group = grSig)
+showAlerts = input.bool(true, 'Bottom Catch / Oversold / Overbought', group = grSig)
+
+grTbl = 'Table'
+showTable = input.bool(true, 'Show Table', group = grTbl)
+textSize  = input.string('Small', 'Text Size', options = ['Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = grTbl)
+
+showBands = input.bool(true, 'Show 25/50/75 Bands')
+
+///////////////////////////////
+// Core computation (single engine)
+///////////////////////////////
+fmcdx(src, n) =>
+    lo = ta.lowest(low, n)
+    hi = ta.highest(high, n)
+    step = ((hi - lo) == 0 ? syminfo.mintick : (hi - lo)) / 100.0
+    math.min(100, math.max(0, (src - lo) / step))
+
+autoLen = math.min(math.max(bar_index, 3), 100)
+int N = lengthMode == 'Auto' ? autoLen : manualLen
+
+// Two boundary lines around price (inner = Smart Money, outer = Daytrader);
+// Retail is simply what's left outside the outer boundary.
+smartMoney    = fmcdx(source * 0.96, N)
+daytrader     = fmcdx(source * 1.04, N)
+retail        = 100 - daytrader
+daytraderBand = daytrader - smartMoney // band width, used for the table stat and classification only
+
+smaSmartMoney = ta.sma(smartMoney, smaLen)
+smaRetail     = ta.sma(retail, smaLen)
+
+smColor = smartMoney >= smaSmartMoney ? color.new(#EB4C42, 10) : color.new(#FFB7C5, 0)
+dtColor = color.new(#FFFF00, 0)
+rtColor = color.new(#39FF14, 0)
+
+showSM = displayMode == 'All' or displayMode == 'Smart Money'
+showDT = displayMode == 'All' or displayMode == 'Daytrader'
+showRT = displayMode == 'All' or displayMode == 'Retail'
+
+// Drawn in this order (Retail -> Daytrader -> Smart Money) so the shorter, later
+// bars visually layer on top of the taller, earlier ones.
+plot(showRT ? retail : na, 'Retail', color = rtColor, linewidth = 10, style = plot.style_columns)
+plot(showDT ? daytrader : na, 'Daytrader', color = dtColor, linewidth = 10, style = plot.style_columns)
+plot(showSM ? smartMoney : na, 'Smart Money', color = smColor, linewidth = 10, style = plot.style_columns)
+
+plot(showSMA ? smaSmartMoney : na, 'SMA Smart Money', color = color.maroon)
+plot(showSMA ? smaRetail : na, 'SMA Retail', color = color.new(#50C878, 0))
+
+hline(showBands ? 75 : na, '75', color = color.black, linestyle = hline.style_dashed)
+hline(showBands ? 50 : na, '50', color = color.black, linestyle = hline.style_dashed)
+hline(showBands ? 25 : na, '25', color = color.black, linestyle = hline.style_dashed)
+
+///////////////////////////////
+// Golden Cross / Death Cross
+///////////////////////////////
+goldenCross = ta.crossover(smaSmartMoney, smaRetail)
+deathCross  = ta.crossunder(smaSmartMoney, smaRetail)
+
+plot(showCross and goldenCross ? smaSmartMoney : na, 'Golden Cross', style = plot.style_columns, linewidth = 2, color = color.purple)
+plot(showCross and deathCross ? smaSmartMoney : na, 'Death Cross', style = plot.style_columns, linewidth = 2, color = color.black)
+
+if showCross and goldenCross
+    label.new(bar_index, smaSmartMoney, 'GC', style = label.style_label_up, color = color.new(color.purple, 80), textcolor = color.black, size = size.small)
+if showCross and deathCross
+    label.new(bar_index, smaSmartMoney, 'DC', style = label.style_label_down, color = color.new(color.black, 80), textcolor = color.white, size = size.small)
+
+alertcondition(goldenCross, 'Golden Cross', 'Smart Money SMA crossed above Retail SMA')
+alertcondition(deathCross, 'Death Cross', 'Smart Money SMA crossed below Retail SMA')
+
+///////////////////////////////
+// Bottom Catch / Oversold / Overbought
+///////////////////////////////
+vol       = volume
+p_vol     = nz(volume[1])
+vpc       = vol * ta.change(close, 1)
+vpcema1   = ta.ema(vpc, 13)
+vpcema2   = ta.ema(vpcema1, 5)
+bcs       = ta.stoch(close, high, low, 14)
+bck       = ta.sma(bcs, 3)
+bcd       = ta.sma(bck, 3)
+hoph      = ta.highest(nz(high[1]), 2)
+hopl      = ta.lowest(nz(low[1]), 2)
+sma20     = ta.sma(source, 20)
+smaVol50  = ta.sma(vol, 50)
+
+volSurge = (vol > smaVol50 and vol < 1.5 * p_vol and close > 1.03 * open and close > nz(close[1])) or
+           (vol > 1.5 * p_vol and close > open and close > nz(close[1])) or
+           (vol > 1.5 * p_vol and vol > smaVol50 and vol < 2.5 * smaVol50 and close >= open and close > nz(close[1])) or
+           (vol > 1.5 * p_vol and vol > 2.5 * smaVol50 and close >= open and close > nz(close[1]))
+
+k_bc1 = (bck >= 10 and bck < 20) or (bck >= 50 and bck < 60)
+bc1 = k_bc1 and open <= sma20 and close >= sma20 and close > open and close > nz(close[1]) and volSurge
+
+BC2(src, n) =>
+    hoh = ta.highest(src, n)
+    lol = ta.lowest(src, n)
+    100 * (hoh - src) / (hoh - lol)
+
+bc2Raw = ta.crossunder(BC2(close, 21), 80) and ta.crossunder(BC2(close, 42), 80)
+pcPivotUp   = nz(smartMoney[2]) > nz(smartMoney[1]) and nz(smartMoney[1]) < smartMoney and smartMoney > smaSmartMoney
+lcPivotDown = nz(retail[2]) < nz(retail[1]) and nz(retail[1]) > retail and retail > 0
+bc2 = pcPivotUp and lcPivotDown and bc2Raw and close > open
+
+bottomCatch = bc1 or bc2
+oversold = not bottomCatch and close > hoph and bcd <= 35 and vpcema1 > 0 and vpcema1 > vpcema2
+
+ob1 = close < ta.sma(close, 5) and close < open and low < low[1] and ta.crossunder(bcd, 80)
+ob2 = close < ta.sma(close, 5) and close < hopl and ta.crossunder(bcd, 65)
+ob3 = close < ta.sma(close, 5) and close < open and ta.crossunder(bck, bcd) and bcd > 65 and bck > 65
+overbought = ob1 or ob2 or ob3
+
+if showAlerts and bottomCatch
+    label.new(bar_index, 15, 'BC', style = label.style_label_up, color = color.new(color.blue, 50), textcolor = color.black, size = size.small)
+if showAlerts and oversold
+    label.new(bar_index, 8, 'OS', style = label.style_label_up, color = color.new(color.white, 30), textcolor = color.black, size = size.small)
+if showAlerts and overbought
+    label.new(bar_index, 92, 'OB', style = label.style_label_down, color = color.new(color.white, 30), textcolor = color.black, size = size.small)
+
+alertcondition(bottomCatch, 'Bottom Catch', 'Bottom Catch signal')
+alertcondition(oversold, 'Oversold', 'Oversold signal')
+alertcondition(overbought, 'Overbought', 'Overbought signal')
+
+///////////////////////////////
+// Behavior classification
+// Internal momentum filter (was the standalone "Fund Simulation" plot/alerts in the
+// original - kept only as a qualifying filter here, with no settings of its own).
+///////////////////////////////
+f_rsv(src, n) =>
+    ll = ta.lowest(low, n)
+    hh = ta.highest(high, n)
+    100 * (src - ll) / (hh - ll)
+
+f_smooth(src, n, m) =>
+    a = m / n
+    v = 0.0
+    v := na(v[1]) ? src : a * src + (1 - a) * v[1]
+    v
+
+momentumRaw   = 3 * f_smooth(f_rsv(source, 30), 5, 1) - 2 * f_smooth(f_smooth(f_rsv(source, 30), 5, 1), 3, 1)
+momentum      = math.min(100, math.max(0, momentumRaw))
+momentumTrend = momentum > ta.sma(momentum, 5)
+momentumUp    = momentum > 50
+
+uptrend   = smaSmartMoney > smaRetail
+downtrend = smaSmartMoney < smaRetail
+
+distribution  = smartMoney > 85 and retail > 5 and downtrend and not momentumTrend and not momentumUp
+strongHold    = (smartMoney > 80 and retail <= 1 and uptrend and momentum > smaSmartMoney and momentumTrend and momentumUp) or
+               (smartMoney > 90 and daytraderBand < 10 and retail < 1)
+breakoutReady = smartMoney > 50 and smartMoney < 80 and retail < 10 and uptrend
+accumulation  = smartMoney < 40 and retail >= 20 and uptrend and momentum > smaRetail and momentumTrend and momentumUp
+
+behavior = distribution ? 'Distribution' : strongHold ? 'Strong Hold' : breakoutReady ? 'Breakout Ready' : accumulation ? 'Accumulation' : 'Neutral'
+
+signal = goldenCross ? 'Golden Cross' : deathCross ? 'Death Cross' : bottomCatch ? 'Bottom Catch' : oversold ? 'Oversold' : overbought ? 'Overbought' : behavior
+
+///////////////////////////////
+// Table
+///////////////////////////////
+textSizeVal = switch textSize
+    'Tiny'   => size.tiny
+    'Small'  => size.small
+    'Normal' => size.normal
+    'Large'  => size.large
+    'Huge'   => size.huge
+    => size.auto
+
+signalColor = switch signal
+    'Strong Hold'    => color.new(color.green, 10)
+    'Breakout Ready' => color.new(color.orange, 10)
+    'Golden Cross'   => color.new(color.orange, 10)
+    'Distribution'   => color.new(color.red, 10)
+    'Death Cross'    => color.new(color.red, 10)
+    'Accumulation'   => color.new(color.blue, 50)
+    'Bottom Catch'   => color.new(color.blue, 50)
+    'Oversold'       => color.new(color.blue, 50)
+    'Overbought'     => color.new(color.orange, 10)
+    => color.new(color.gray, 80)
+
+var table t = table.new(position.middle_right, 1, 5, border_width = 1)
+if showTable and barstate.islast
+    table.cell(t, 0, 0, 'Smart Money Flow', bgcolor = color.new(color.yellow, 50), text_color = color.black, text_size = textSizeVal, width = 14)
+    table.cell(t, 0, 1, 'Smart Money: ' + str.tostring(smartMoney, '0.0'), bgcolor = smColor, text_color = color.black, text_size = textSizeVal)
+    table.cell(t, 0, 2, 'Daytrader: ' + str.tostring(daytraderBand, '0.0'), bgcolor = color.new(color.yellow, 0), text_color = color.black, text_size = textSizeVal)
+    table.cell(t, 0, 3, 'Retail: ' + str.tostring(retail, '0.0'), bgcolor = color.new(#39FF14, 0), text_color = color.black, text_size = textSizeVal)
+    table.cell(t, 0, 4, 'Signal: ' + signal, bgcolor = signalColor, text_color = color.black, text_size = textSizeVal)
+
+///////////////////////////////
+// Manual length warning
+///////////////////////////////
+if lengthMode == 'Manual' and manualLen > bar_index + 2 and barstate.islast
+    label.new(bar_index + 3, 50, 'Manual Length too long for available history', color = color.red, textcolor = color.white, style = label.style_label_left, size = size.small)
