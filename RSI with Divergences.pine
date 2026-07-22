@@ -35,7 +35,9 @@ bearZoneCss  = input(color.new(#ff1744, 88),         title = "Bear Zone Color", 
 rsi = ta.rsi(close, len)
 
 //------------------------------------------------------------------------------
-// Divergence Logic (Libertus method)
+// Divergence Logic — tracks the running price/RSI extremes since the last
+// RSI pivot and compares them against the newly confirmed pivot to flag
+// a break in the price-vs-momentum relationship.
 //------------------------------------------------------------------------------
 hb = math.abs(ta.highestbars(rsi, xbars))
 lb = math.abs(ta.lowestbars(rsi, xbars))
