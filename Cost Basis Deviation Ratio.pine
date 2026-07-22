@@ -1,0 +1,43 @@
+//@version=6
+indicator("Cost Basis Deviation Ratio", shorttitle = "CBR", overlay = false)
+
+// Price / moving-average ratio across three lookback cohorts, using each MA as
+// a lightweight proxy for that cohort's average cost basis. This is NOT
+// on-chain realized value (no UTXO/holder-cohort data) — it's a simple
+// SMA-ratio oscillator that works on any symbol, crypto or not.
+
+grpCohorts = "Cohort Lengths"
+shortTermLength = input.int(14,  "Short-term Cohort (bars)", minval = 1, group = grpCohorts)
+midTermLength   = input.int(50,  "Mid-term Cohort (bars)",   minval = 1, group = grpCohorts)
+longTermLength  = input.int(200, "Long-term Cohort (bars)",  minval = 1, group = grpCohorts)
+
+grpZones = "Valuation Zones"
+overvaluedLevel  = input.float(1.5, "Overvalued Threshold",  step = 0.05, group = grpZones)
+undervaluedLevel = input.float(0.5, "Undervalued Threshold", step = 0.05, group = grpZones)
+
+// ─── Cost-basis proxy per cohort (SMA of price over that lookback) ─────────
+shortTermBasis = ta.sma(close, shortTermLength)
+midTermBasis   = ta.sma(close, midTermLength)
+longTermBasis  = ta.sma(close, longTermLength)
+
+// ─── Price / cost-basis ratio per cohort ───────────────────────────────────
+// >1 = price sits above that cohort's average entry price, <1 = below
+shortTermRatio = close / shortTermBasis
+midTermRatio   = close / midTermBasis
+longTermRatio  = close / longTermBasis
+
+plot(shortTermRatio, color = color.blue,  title = "Short-term Ratio")
+plot(midTermRatio,   color = color.green, title = "Mid-term Ratio")
+plot(longTermRatio,  color = color.red,   title = "Long-term Ratio")
+
+// Smoothed trend of each ratio, to read direction rather than just level
+plot(ta.sma(shortTermRatio, shortTermLength), color = color.new(color.blue, 50),  title = "Short-term Ratio Trend", style = plot.style_linebr)
+plot(ta.sma(midTermRatio,   midTermLength),   color = color.new(color.green, 50), title = "Mid-term Ratio Trend",   style = plot.style_linebr)
+plot(ta.sma(longTermRatio,  longTermLength),  color = color.new(color.red, 50),   title = "Long-term Ratio Trend",  style = plot.style_linebr)
+
+hline(1, "Cost Basis (Ratio = 1)", color = color.gray, linestyle = hline.style_dotted)
+hline(overvaluedLevel,  "Overvalued Threshold",  color = color.red,   linestyle = hline.style_dotted)
+hline(undervaluedLevel, "Undervalued Threshold", color = color.green, linestyle = hline.style_dotted)
+
+bgcolor(shortTermRatio > overvaluedLevel or midTermRatio > overvaluedLevel or longTermRatio > overvaluedLevel ? color.new(color.red, 90) : na, title = "Overvalued Zone")
+bgcolor(shortTermRatio < undervaluedLevel or midTermRatio < undervaluedLevel or longTermRatio < undervaluedLevel ? color.new(color.green, 90) : na, title = "Undervalued Zone")
