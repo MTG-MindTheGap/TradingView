@@ -1,0 +1,149 @@
+//@version=6
+indicator('Short Covering Gauge', shorttitle = 'SCG', overlay = true, max_labels_count = 500)
+
+// The CLOSE is where forced flow clears — margin calls, MOC imbalances, and
+// vol-control/CTA rebalancing all execute into the bell, on a deadline, not
+// an opinion. This script looks inside each bar using lower-timeframe
+// sub-bars and checks whether the LATE portion of the bar reversed what the
+// EARLY portion was doing: a weekly bar trading meaningfully below its open
+// through Wednesday that claws back through a reclaim level by
+// Thursday/Friday, or a daily bar that flips bullish in its final hour(s).
+// That late-segment flip reads as forced short covering (or, in reverse,
+// forced late selling) — a pressure gauge, not a prediction.
+//
+// "Weak" and "strong" are measured against the bar's OPEN — the one
+// reference point fixed before either segment happens — rather than the
+// bar's own final high/low range. Using the final range is self-referential:
+// a rally in the late segment is often what sets the bar's high in the first
+// place, so testing against the eventual range's mid-point flags almost
+// every bar. Anchoring to the open, plus an ATR floor on the early move,
+// cuts a lot of noise but an ATR-sized dip below open is still a completely
+// routine mid-week wiggle for a volatile name — it says nothing about
+// forced flow on its own. What actually makes a reversal notable is
+// CONTEXT: the early segment dragging price to a fresh extreme relative to
+// recent bars (a real capitulation/blowoff point), not just off its own
+// open. Requiring that fresh-extreme context is what makes signals rare and
+// worth watching, rather than a running commentary on every bar's shape.
+
+// ─── Inputs ─────────────────────────────────────────────────────────────
+grpSeg = 'Bar Segmentation'
+tfModeInput  = input.string('Auto', 'Sub-bar Timeframe', options = ['Auto', '1', '5', '15', '30', '60', '240', '1D'], group = grpSeg,
+     tooltip = "Auto uses daily sub-bars on a weekly/monthly chart, hourly sub-bars on a daily chart, and roughly a fifth of the bar's duration on intraday charts.")
+lateFraction = input.float(0.4, 'Late-Segment Fraction', minval = 0.1, maxval = 0.9, step = 0.05, group = grpSeg,
+     tooltip = '0.4 = the last 2 of 5 sub-bars, e.g. Thu+Fri of a trading week. Raise it to demand a longer late-session move before flagging a signal.')
+
+grpStruct = 'Structure Context'
+lookbackBars = input.int(20, 'Fresh Extreme Lookback (bars)', minval = 5, maxval = 200, group = grpStruct,
+     tooltip = "The early segment's low (or high) must break beyond the extreme of the prior N bars to count — this is what separates a genuine capitulation/blowoff point from routine mid-range noise. Raise it to demand a more significant extreme.")
+
+grpSig = 'Signal'
+reclaimPct     = input.float(60, 'Reclaim Level (% of early move)', minval = 10, maxval = 95, step = 5, group = grpSig,
+     tooltip = 'How much of the early drawdown (or rally) the late segment must claw back (or give back), measured from the early extreme toward the open. 60% = most of the way back to open. Raise it to demand a fuller reversal.')
+minMoveATR     = input.float(0.3, 'Min Early Move (x ATR)', minval = 0.05, maxval = 3, step = 0.05, group = grpSig,
+     tooltip = 'The early segment must have moved at least this many ATRs away from the open for the bar to count as genuinely weak/strong going into the late segment.')
+atrLen         = input.int(14, 'ATR Length', minval = 1, group = grpSig)
+requireConfirm = input.bool(true, 'Only Mark Confirmed Bars', group = grpSig,
+     tooltip = 'Wait for the bar to close before stamping a signal — the close is what actually settles the forced flow, so a still-forming bar can flip back and forth.')
+
+grpDisp = 'Display'
+showLabels = input.bool(true, 'Show Reclaim/Break % Labels', group = grpDisp)
+showBg     = input.bool(true, 'Shade Bars by Pressure', group = grpDisp)
+colBull    = input.color(#26a69a, 'Short Covering (Bull)', group = grpDisp)
+colBear    = input.color(#ef5350, 'Forced Selling (Bear)', group = grpDisp)
+
+// ─── Auto sub-bar timeframe: picks a lower resolution that always divides
+// the current bar into several sub-bars, without ever equalling or
+// exceeding it (which request.security_lower_tf cannot accept) ──────────
+f_autoTF() =>
+    string tf = na
+    curSec = timeframe.in_seconds(timeframe.period)
+    if timeframe.isweekly or timeframe.ismonthly
+        tf := '1D'
+    else if timeframe.isdaily
+        tf := '60'
+    else if curSec >= 300
+        subMin = int(math.max(math.round(curSec / 5 / 60), 1))
+        tf := str.tostring(subMin)
+    tf
+
+lowerTF = tfModeInput == 'Auto' ? f_autoTF() : tfModeInput
+tfValid = not na(lowerTF) and timeframe.in_seconds(lowerTF) < timeframe.in_seconds(timeframe.period)
+
+array<float> subCloses = array.new<float>(0)
+array<float> subHighs  = array.new<float>(0)
+array<float> subLows   = array.new<float>(0)
+if tfValid
+    subCloses := request.security_lower_tf(syminfo.tickerid, lowerTF, close)
+    subHighs  := request.security_lower_tf(syminfo.tickerid, lowerTF, high)
+    subLows   := request.security_lower_tf(syminfo.tickerid, lowerTF, low)
+n = array.size(subCloses)
+
+atrVal = ta.atr(atrLen)
+
+float preLateClose = na
+float earlyLow     = na
+float earlyHigh    = na
+if n >= 2
+    splitIdx = int(math.min(math.max(math.round(n * (1 - lateFraction)), 1), n - 1))
+    preLateClose := array.get(subCloses, splitIdx - 1)
+    earlyLow     := array.min(array.slice(subLows,  0, splitIdx))
+    earlyHigh    := array.max(array.slice(subHighs, 0, splitIdx))
+
+earlyDrawdown = na(earlyLow)  ? na : math.max(open - earlyLow,  0)
+earlyRally    = na(earlyHigh) ? na : math.max(earlyHigh - open, 0)
+
+genuineWeak   = not na(earlyDrawdown) and earlyDrawdown >= minMoveATR * atrVal
+genuineStrong = not na(earlyRally)    and earlyRally    >= minMoveATR * atrVal
+
+// The early low/high must break beyond the prior N bars' extreme — a real
+// capitulation/blowoff point, not just a dip below this bar's own open.
+priorLow  = ta.lowest(low[1],  lookbackBars)
+priorHigh = ta.highest(high[1], lookbackBars)
+freshLow  = not na(earlyLow)  and earlyLow  <= priorLow
+freshHigh = not na(earlyHigh) and earlyHigh >= priorHigh
+
+reclaimLevelBull = na(earlyDrawdown) ? na : open - earlyDrawdown * (1 - reclaimPct / 100)
+reclaimLevelBear = na(earlyRally)    ? na : open + earlyRally    * (1 - reclaimPct / 100)
+
+confirmedOk = not requireConfirm or barstate.isconfirmed
+
+bullSignal = genuineWeak   and freshLow  and not na(preLateClose) and confirmedOk and preLateClose < reclaimLevelBull and close >= reclaimLevelBull
+bearSignal = genuineStrong and freshHigh and not na(preLateClose) and confirmedOk and preLateClose > reclaimLevelBear and close <= reclaimLevelBear
+
+recoveryPct = genuineWeak   ? (close - earlyLow)  / earlyDrawdown * 100 : na  // 0% = still at the early low, 100% = fully back to open
+pulldownPct = genuineStrong ? (earlyHigh - close) / earlyRally    * 100 : na  // 0% = still at the early high, 100% = fully back to open
+
+// A single signed reading for shading: positive = bullish (recovering a
+// drawdown), negative = bearish (giving back a rally), 0 = sitting right at
+// the reclaim/break level. Only shown when the dominant early move (whichever
+// is larger) cleared the ATR floor AND reached a fresh extreme — the same
+// bar-selection the discrete signal uses — so shading stays rare too instead
+// of painting nearly every bar.
+domIsDrawdown = earlyDrawdown >= earlyRally
+pressure = domIsDrawdown
+     ? (genuineWeak   and freshLow  ? recoveryPct - reclaimPct : na)
+     : (genuineStrong and freshHigh ? reclaimPct - pulldownPct : na)
+
+// ─── Plotting ───────────────────────────────────────────────────────────
+plotshape(bullSignal, title = 'Short Covering (Late Reclaim)',  style = shape.triangleup,   location = location.belowbar, color = colBull, size = size.small)
+plotshape(bearSignal, title = 'Forced Selling (Late Breakdown)', style = shape.triangledown, location = location.abovebar, color = colBear, size = size.small)
+
+plot(bullSignal ? reclaimLevelBull : bearSignal ? reclaimLevelBear : na, title = 'Reclaim Level', style = plot.style_cross, color = color.new(color.gray, 30))
+
+color bgColor = na
+if showBg and not na(pressure)
+    transp = int(90 - math.min(math.abs(pressure), 80) * 0.75)
+    bgColor := pressure > 0 ? color.new(colBull, transp) : color.new(colBear, transp)
+bgcolor(bgColor, title = 'Pressure Shading')
+
+if showLabels and bullSignal
+    label.new(bar_index, low, str.tostring(math.round(recoveryPct)) + '% reclaimed',
+         style = label.style_label_up, color = color.new(colBull, 20), textcolor = color.white,
+         size = size.tiny, yloc = yloc.belowbar)
+if showLabels and bearSignal
+    label.new(bar_index, high, str.tostring(math.round(pulldownPct)) + '% given back',
+         style = label.style_label_down, color = color.new(colBear, 20), textcolor = color.white,
+         size = size.tiny, yloc = yloc.abovebar)
+
+alertcondition(bullSignal, 'Short Covering (Late Reclaim)',  'This bar broke to a fresh low and the late segment rallied back through the reclaim level — reads as forced short covering, not conviction.')
+alertcondition(bearSignal, 'Forced Selling (Late Breakdown)', 'This bar broke to a fresh high and the late segment sold back through the reclaim level — reads as forced late selling, not conviction.')
