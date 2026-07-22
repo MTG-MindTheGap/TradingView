@@ -1,0 +1,99 @@
+//@version=6
+indicator('Exhaustion Count Heatmap', overlay = true, max_labels_count = 500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════
+scPaintBars   = input.bool(false, 'Paint Bars',                                     group = 'Setup Count')
+scShowLabels  = input.bool(true,  'Show Labels',                                     group = 'Setup Count')
+scShow7       = input.bool(false, 'Show Label at Count 7',                           group = 'Setup Count')
+scShow9       = input.bool(false, 'Show Label at Count 9',                           group = 'Setup Count')
+scShow13      = input.bool(true,  'Show Label at Count 13',                          group = 'Setup Count')
+scLabelSize   = input.string('tiny', 'Label Size',
+     options = ['auto', 'tiny', 'small', 'normal', 'large', 'huge'], group = 'Setup Count')
+scLabelOffset = input.int(0, 'Label Vertical Offset (ATR multiples)',
+     minval = -20, maxval = 20, group = 'Setup Count')
+atrLen        = input.int(14, 'ATR Length (for label offset)', minval = 1, group = 'Setup Count')
+
+scBuyBarStart  = input.color(color.rgb(17, 231, 242), 'Buy Bar Start Color',  group = 'Setup Count Colors')
+scBuyBarEnd    = input.color(color.rgb(2, 38, 158),   'Buy Bar End Color',    group = 'Setup Count Colors')
+scSellBarStart = input.color(color.rgb(238, 242, 17), 'Sell Bar Start Color', group = 'Setup Count Colors')
+scSellBarEnd   = input.color(color.rgb(207, 0, 0),    'Sell Bar End Color',   group = 'Setup Count Colors')
+scBuyLbl7Bg    = input.color(color.new(color.blue, 40),  'Buy Label 7 Bg',    group = 'Setup Count Colors')
+scBuyLbl9Bg    = input.color(color.new(color.blue, 10),  'Buy Label 9 Bg',    group = 'Setup Count Colors')
+scBuyLbl13Bg   = input.color(color.rgb(2, 38, 158),      'Buy Label 13 Bg',   group = 'Setup Count Colors')
+scBuyLblText   = input.color(color.white,                 'Buy Label Text',   group = 'Setup Count Colors')
+scSellLbl7Bg   = input.color(color.new(color.orange, 40), 'Sell Label 7 Bg',  group = 'Setup Count Colors')
+scSellLbl9Bg   = input.color(color.new(color.red, 10),    'Sell Label 9 Bg',  group = 'Setup Count Colors')
+scSellLbl13Bg  = input.color(color.rgb(207, 0, 0),        'Sell Label 13 Bg', group = 'Setup Count Colors')
+scSellLblText  = input.color(color.white,                  'Sell Label Text',  group = 'Setup Count Colors')
+
+// ═══════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+f_getSize(s) =>
+    switch s
+        'tiny'   => size.tiny
+        'small'  => size.small
+        'normal' => size.normal
+        'large'  => size.large
+        'huge'   => size.huge
+        =>          size.auto
+
+f_colorLerp(c1, c2, cnt) =>
+    clamped = math.max(1, math.min(13, cnt))
+    t = (clamped - 1) / 12.0
+    r = math.round(color.r(c1) + (color.r(c2) - color.r(c1)) * t)
+    g = math.round(color.g(c1) + (color.g(c2) - color.g(c1)) * t)
+    b = math.round(color.b(c1) + (color.b(c2) - color.b(c1)) * t)
+    color.rgb(r, g, b)
+
+atr = nz(ta.atr(atrLen), 1.0)
+
+// ═══════════════════════════════════════════════════════════════════════
+// SETUP COUNTER — consecutive-close buy/sell exhaustion counter (1–13)
+// ═══════════════════════════════════════════════════════════════════════
+buySetup  = 0
+buySetup  := close < close[4] ? buySetup[1] == 13 ? 1 : buySetup[1] + 1 : 0
+sellSetup = 0
+sellSetup := close > close[4] ? sellSetup[1] == 13 ? 1 : sellSetup[1] + 1 : 0
+
+scBuyColor  = buySetup  >= 1 ? f_colorLerp(scBuyBarStart,  scBuyBarEnd,  buySetup)  : na
+scSellColor = sellSetup >= 1 ? f_colorLerp(scSellBarStart, scSellBarEnd, sellSetup) : na
+scBarColor  = buySetup  >= 1 ? scBuyColor : sellSetup >= 1 ? scSellColor : na
+
+barcolor(scPaintBars ? scBarColor : na)
+
+if scShowLabels
+    scLblSz  = f_getSize(scLabelSize)
+    scOffset = atr * scLabelOffset
+    if buySetup == 7 and scShow7
+        label.new(bar_index, low - scOffset, '7',
+             color = scBuyLbl7Bg, textcolor = scBuyLblText,
+             style = label.style_label_up, size = scLblSz)
+    if buySetup == 9 and scShow9
+        label.new(bar_index, low - scOffset, '9',
+             color = scBuyLbl9Bg, textcolor = scBuyLblText,
+             style = label.style_label_up, size = scLblSz)
+    if buySetup == 13 and scShow13
+        label.new(bar_index, low - scOffset, '13',
+             color = scBuyLbl13Bg, textcolor = scBuyLblText,
+             style = label.style_label_up, size = scLblSz)
+    if sellSetup == 7 and scShow7
+        label.new(bar_index, high + scOffset, '7',
+             color = scSellLbl7Bg, textcolor = scSellLblText,
+             style = label.style_label_down, size = scLblSz)
+    if sellSetup == 9 and scShow9
+        label.new(bar_index, high + scOffset, '9',
+             color = scSellLbl9Bg, textcolor = scSellLblText,
+             style = label.style_label_down, size = scLblSz)
+    if sellSetup == 13 and scShow13
+        label.new(bar_index, high + scOffset, '13',
+             color = scSellLbl13Bg, textcolor = scSellLblText,
+             style = label.style_label_down, size = scLblSz)
+
+// ═══════════════════════════════════════════════════════════════════════
+// HIDDEN PLOTS (for strategy use / alerts)
+// ═══════════════════════════════════════════════════════════════════════
+plot(buySetup,  title = 'Buy Setup Count',  display = display.none)
+plot(sellSetup, title = 'Sell Setup Count', display = display.none)
