@@ -1,14 +1,8 @@
 # TradingView Publish Descriptions
 
 Ready-to-paste descriptions for the TradingView "Description" field when
-publishing each script. Each one covers the three things PineCoders
-moderation checks for: what's original about it, what it does and how it's
+publishing each script. Each one covers what the script does and how it's
 calculated (in plain language, not Pine), and how to use it.
-
-Scripts not listed here (Hull Suite, Bollinger Bands, Pivot Points, Vector
-Candles, Visible Range Volume Profile, Exhaustion Count Heatmap, Smart Money
-Flow, Historical Volatility Percentile) are intentionally excluded — see the
-"Publishing status" section of `README.md` for why.
 
 ---
 
@@ -18,14 +12,11 @@ Flow, Historical Volatility Percentile) are intentionally excluded — see the
 Reads two consecutive phases of the same ADX/DMI trend-strength cycle from
 one shared calculation: a "flash" detector that catches the low-ADX setup
 phase *before* a trend starts, and a DMI/ADX cross engine that catches
-confirmation and exhaustion *after* one does. They're kept in one script
-rather than published separately because they're sequential reads of the
-same underlying series (not two unrelated indicators bundled together) —
-the flash detector's tracked breakout target and the DMI signals both
-derive from the same `ta.dmi()` call, and the flash target table is what
-tells you where the eventual DMI breakout/breakdown is likely to originate
-from. Each half can still be toggled off independently if you only want one
-phase of the read.
+confirmation and exhaustion *after* one does. The flash detector's tracked
+breakout target and the DMI signals both derive from the same `ta.dmi()`
+call, and the flash target table tells you where the eventual DMI
+breakout/breakdown is likely to originate from. Each half can be toggled off
+independently if you only want one phase of the read.
 
 **How it's calculated**
 - *ADX Flash*: highlights every bar where ADX(14) sits below your threshold
@@ -83,9 +74,8 @@ attached. Buy/Sell labels come with matching alerts.
 
 **Overview**
 Standard RSI plus a divergence engine, "control zone" bands, and
-zone-break alerts — three tools that are each common individually, combined
-here into a single read: momentum level, momentum-vs-price disagreement,
-and a defined zone-loss trigger.
+zone-break alerts — three tools combined into a single read: momentum
+level, momentum-vs-price disagreement, and a defined zone-loss trigger.
 
 **How it's calculated**
 - *Divergence*: the script tracks the running price and RSI extremes since
@@ -259,26 +249,22 @@ short-sale data for a more direct read than the volume-climax proxy alone.
 ## Move Strength Index
 
 **Overview**
-An accurate relative-volume indicator with a genuinely clear signal:
-column height shows the relative-volume multiple, color intensity
-separately highlights which of those bars are actually unusual for that
-specific symbol, and a distinct compression color flags the specific
-case where heavy volume produces almost no range — a classic
-effort-without-result signature that often precedes a sharp move.
+A relative-volume indicator: column height shows the relative-volume
+multiple, color intensity separately highlights which of those bars are
+actually unusual for that specific symbol, and a distinct compression color
+flags the specific case where heavy volume produces almost no range — a
+classic effort-without-result signature that often precedes a sharp move.
 
 **How it's calculated**
 Relative volume is current volume divided by a smoothed (RMA) average of
 the *prior* bars — the still-forming bar is excluded from its own
-baseline (a common flaw in naive relative-volume scripts, which quietly
-dampens real spikes), and the smoothed baseline decays gradually rather
-than using a fixed rolling window, avoiding the "step" artifact that
-occurs when an old outlier bar abruptly exits a fixed-length SMA window.
-Color intensity is driven by the bar's percentile rank against its own
-trailing history (default 100 bars), not a fixed multiple — a fixed
-brightness cutoff only produces contrast if the symbol regularly reaches
-that multiple, whereas percentile rank self-calibrates so the loudest
-days for any given symbol are always vivid and quiet days are always
-dim.
+baseline (otherwise its own volume dampens the reading), and the smoothed
+baseline decays gradually rather than using a fixed rolling window,
+avoiding the "step" artifact that occurs when an old outlier bar abruptly
+exits a fixed-length SMA window. Color intensity is driven by the bar's
+percentile rank against its own trailing history (default 100 bars), not a
+fixed multiple — percentile rank self-calibrates so the loudest days for
+any given symbol are always vivid and quiet days are always dim.
 
 Direction is close vs. open — the same test used to color the candles on
 the price chart itself, so MSI's green/red always agrees with what the
